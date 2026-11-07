@@ -1,26 +1,36 @@
 import { useCallback, useEffect, useState } from "react";
 import { docsAgent } from "./agents/docs";
 import { ApiError, getStatus, type StatusResponse } from "./core/claude";
+import { resolveContext, type Resolved } from "./core/contextBuilder";
 import { setPrices } from "./core/prices";
+import { sessionTask, setSession, useSession } from "./core/session";
 import { clearToken, getToken } from "./core/settings";
+import { useDataVersion } from "./db/changes";
+import { ContextScreen } from "./screens/ContextScreen";
 import { Gate } from "./screens/Gate";
 import { LibraryScreen } from "./screens/LibraryScreen";
+import { MemoryScreen } from "./screens/MemoryScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { WorkScreen } from "./screens/WorkScreen";
 import { Icon, type IconName } from "./ui/Icon";
-import { Toaster } from "./ui/toast";
+import { Toaster, toast } from "./ui/toast";
 
-type Tab = "work" | "library" | "settings";
+type Tab = "work" | "ctx" | "library" | "memory" | "settings";
 
+// Підпис «Параметри» замість «Налаштування»: п'ять вкладок на 375 pt не вміщують довге слово.
 const TABS: { id: Tab; label: string; icon: IconName }[] = [
   { id: "work", label: "Робота", icon: "tWork" },
+  { id: "ctx", label: "Контекст", icon: "tCtx" },
   { id: "library", label: "Бібліотека", icon: "tLib" },
-  { id: "settings", label: "Налаштування", icon: "tSet" },
+  { id: "memory", label: "Пам'ять", icon: "tMem" },
+  { id: "settings", label: "Параметри", icon: "tSet" },
 ];
 
 const HEAD: Record<Tab, { title: string; sub: string }> = {
   work: { title: docsAgent.name, sub: docsAgent.subtitle },
+  ctx: { title: "Контекст запуску", sub: `Що отримає «${docsAgent.name}»` },
   library: { title: "Бібліотека", sub: "Збережені результати й журнал запусків" },
+  memory: { title: "Пам'ять", sub: "Профіль і факти для всіх агентів" },
   settings: { title: "Налаштування", sub: "Витрати, дані, доступ" },
 };
 
@@ -29,6 +39,9 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("work");
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [statusError, setStatusError] = useState("");
+  const [resolved, setResolved] = useState<Resolved | null>(null);
+  const session = useSession();
+  const dataVersion = useDataVersion();
 
   const logout = useCallback(() => {
     clearToken();
@@ -53,14 +66,30 @@ export default function App() {
     void refresh();
   }, [refresh]);
 
-  // Просимо браузер не чистити IndexedDB автоматично (див. «Надійність локальних даних» у специфікації).
+  // Просимо браузер не чистити IndexedDB автоматично.
   useEffect(() => {
     if (token) void navigator.storage?.persist?.();
   }, [token]);
 
+  // Попередній перегляд контексту: перераховується, коли змінюються задача, фрагмент, перемикачі чи дані.
+  useEffect(() => {
+    if (!token) return;
+    let dead = false;
+    const t = setTimeout(() => {
+      resolveContext(docsAgent, sessionTask(session))
+        .then((r) => !dead && setResolved(r))
+        .catch((e) => console.error(e));
+    }, 250);
+    return () => {
+      dead = true;
+      clearTimeout(t);
+    };
+  }, [token, session.task, session.frag, session.turns, session.toggles, session.extraArtifactIds, dataVersion]);
+
   if (!token) return <Gate onToken={setTokenState} />;
 
   const head = HEAD[tab];
+  const screen = (id: Tab) => "screen" + (tab === id ? " on" : "");
   return (
     <div className="app">
       <header className="top">
@@ -68,17 +97,35 @@ export default function App() {
           <h1>{head.title}</h1>
           <p>{head.sub}</p>
         </div>
-        {tab === "work" && <span className="pill">{docsAgent.model}</span>}
+        {(tab === "work" || tab === "ctx") && <span className="pill">{docsAgent.model}</span>}
       </header>
 
       <main>
-        <section className={"screen work-host" + (tab === "work" ? " on" : "")} aria-label="Робота">
-          <WorkScreen token={token} onAuthError={logout} onSpent={refresh} />
+        <section className={screen("work") + " work-host"} aria-label="Робота">
+          <WorkScreen token={token} resolved={resolved} onAuthError={logout} onSpent={refresh} onOpenContext={() => setTab("ctx")} />
         </section>
-        <section className={"screen" + (tab === "library" ? " on" : "")} aria-label="Бібліотека">
+        <section className={screen("ctx")} aria-label="Контекст">
+          <ContextScreen
+            agent={docsAgent}
+            resolved={resolved}
+            onRun={() => {
+              if (!session.task.trim()) {
+                toast("Введіть задачу на екрані «Робота»");
+                setTab("work");
+                return;
+              }
+              setTab("work");
+              setSession((s) => ({ runNonce: s.runNonce + 1 }));
+            }}
+          />
+        </section>
+        <section className={screen("library")} aria-label="Бібліотека">
           <LibraryScreen />
         </section>
-        <section className={"screen" + (tab === "settings" ? " on" : "")} aria-label="Налаштування">
+        <section className={screen("memory")} aria-label="Пам'ять">
+          <MemoryScreen />
+        </section>
+        <section className={screen("settings")} aria-label="Налаштування">
           <SettingsScreen status={status} statusError={statusError} onRefresh={refresh} onLogout={logout} />
         </section>
       </main>
@@ -91,6 +138,7 @@ export default function App() {
           </button>
         ))}
       </nav>
+      <div id="sheet-root" />
       <Toaster />
     </div>
   );
