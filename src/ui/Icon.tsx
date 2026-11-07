@@ -13,6 +13,15 @@ const P = {
   trash: '<path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/>',
   down: '<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>',
   reuse: '<path d="M4 8h12l-3-3M20 16H8l3 3"/>',
+  tCtx: '<path d="M12 4l8 4-8 4-8-4z"/><path d="M4 12l8 4 8-4M4 16l8 4 8-4"/>',
+  tMem: '<path d="M7 4h10v16l-5-4-5 4z"/>',
+  lock: '<rect x="6" y="11" width="12" height="9" rx="2"/><path d="M9 11V8a3 3 0 016 0v3"/>',
+  pin: '<path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/>',
+  edit: '<path d="M4 20l1-4L16 5l3 3L8 19z"/><path d="M14 7l3 3"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  clip: '<path d="M8 12l6-6a3 3 0 014 4l-8 8a5 5 0 01-7-7l7-7"/>',
+  remember: '<path d="M7 4h10v16l-5-4-5 4z"/><path d="M12 8v4M10 10h4"/>',
 } as const;
 
 export type IconName = keyof typeof P;
