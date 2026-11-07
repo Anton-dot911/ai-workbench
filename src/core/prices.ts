@@ -10,3 +10,9 @@ export const getPrices = (): PriceTable => table;
 export function costFor(model: string, usage: Usage): number {
   return table[model] ? costUsd(model, usage, table) : 0;
 }
+
+/** Оцінка вартості вхідних токенів (без урахування кешу). */
+export function inputCostFor(model: string, tokens: number): number {
+  const p = table[model];
+  return p ? (tokens * p.in) / 1e6 : 0;
+}

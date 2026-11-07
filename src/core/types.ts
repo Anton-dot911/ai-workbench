@@ -35,6 +35,8 @@ export interface AgentManifest {
   examples: string[];
 }
 
+export type Tier = "stable" | "relevant" | "operative";
+
 export interface Task {
   input: string;
   selection?: string;
@@ -42,12 +44,21 @@ export interface Task {
   sessionId?: string;
   chainId?: string;
   mode?: string;
+  /** Останні обміни цієї сесії (джерело `history`). */
+  history?: { task: string; output: string }[];
+  /** Ручні перемикачі джерел контексту: id джерела → увімкнено. Без запису діє `defaultOn`. */
+  toggles?: Record<string, boolean>;
+  /** Артефакти, додані до контексту вручну. */
+  extraArtifactIds?: string[];
 }
 
 export interface ContextSource {
   kind: string;
   id: string;
   title: string;
+  /** Поля нижче відсутні в запусках, збережених на етапі 1. */
+  tier?: Tier;
+  tokens?: number;
 }
 
 export interface ContextPacket {
@@ -56,6 +67,7 @@ export interface ContextPacket {
   operative: string;
   tokenEstimate: number;
   sources: ContextSource[];
+  warnings?: string[];
 }
 
 // ----- Сховище (IndexedDB через Dexie) -----
@@ -69,6 +81,8 @@ export interface Profile {
   expertise: string[];
   brandWords?: string[];
   codingPrefs?: { stack: string[]; style: string };
+  /** Поля, які збирач контексту не передає в запити, поки агент не попросить явно. */
+  privateFields?: string[];
 }
 
 export interface MemoryItem {
