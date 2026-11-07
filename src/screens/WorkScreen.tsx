@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { docsAgent } from "../agents/docs";
 import { ApiError } from "../core/claude";
-import { estimateTokens } from "../core/contextBuilder";
+import type { Resolved } from "../core/contextBuilder";
+import { estimateRun } from "../core/estimate";
 import { runAgent } from "../core/runner";
-import { db, saveRunAsArtifact } from "../db/db";
+import { getSession, sessionTask, setSession, useSession } from "../core/session";
+import { addMemory, db, saveRunAsArtifact } from "../db/db";
+import { FactForm } from "../ui/FactForm";
 import { Icon } from "../ui/Icon";
-import { fmt, money } from "../ui/format";
+import { Sheet } from "../ui/Sheet";
+import { approx, fmt, money, plural, tk } from "../ui/format";
 import { toast } from "../ui/toast";
 
 interface FeedItem {
@@ -17,24 +21,28 @@ interface FeedItem {
   error?: string;
   truncated?: boolean;
   usage?: { input: number; output: number; cacheRead: number; costUsd: number };
+  sources?: number;
   runId?: string;
   saved?: boolean;
 }
 
 interface Props {
   token: string;
+  resolved: Resolved | null;
   onAuthError: () => void;
   onSpent: () => void;
+  onOpenContext: () => void;
 }
 
-export function WorkScreen({ token, onAuthError, onSpent }: Props) {
+export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContext }: Props) {
+  const session = useSession();
   const [feed, setFeed] = useState<FeedItem[]>([]);
-  const [task, setTask] = useState("");
-  const [frag, setFrag] = useState("");
   const [fragOpen, setFragOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [remember, setRemember] = useState<FeedItem | null>(null);
   const abort = useRef<AbortController | null>(null);
   const feedRef = useRef<HTMLDivElement>(null);
+  const lastNonce = useRef(session.runNonce);
 
   const patch = (id: string, fn: (i: FeedItem) => Partial<FeedItem>) =>
     setFeed((f) => f.map((i) => (i.id === id ? { ...i, ...fn(i) } : i)));
@@ -44,30 +52,47 @@ export function WorkScreen({ token, onAuthError, onSpent }: Props) {
     if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTop = el.scrollHeight;
   }, [feed]);
 
+  // Запуск, ініційований з екрана «Контекст».
+  useEffect(() => {
+    if (session.runNonce !== lastNonce.current) {
+      lastNonce.current = session.runNonce;
+      void send();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.runNonce]);
+
   async function send() {
-    const text = task.trim();
+    const s = getSession();
+    const text = s.task.trim();
     if (!text || busy) return;
+    const task = sessionTask(s);
     const id = crypto.randomUUID();
-    const selection = frag.trim() || undefined;
-    setFeed((f) => [...f, { id, task: text, selection, output: "", status: "running" }]);
-    setTask("");
+    setFeed((f) => [...f, { id, task: text, selection: task.selection, output: "", status: "running" }]);
+    setSession({ task: "" });
     setBusy(true);
     const ac = new AbortController();
     abort.current = ac;
     try {
-      const { run, stopReason } = await runAgent(docsAgent, { input: text, selection }, {
+      const { run, text: out, stopReason } = await runAgent(docsAgent, task, {
         token,
         signal: ac.signal,
         onText: (d) => patch(id, (i) => ({ output: i.output + d })),
       });
-      patch(id, () => ({ status: "done", runId: run.id, usage: run.usage, truncated: stopReason === "max_tokens" }));
+      patch(id, () => ({
+        status: "done",
+        runId: run.id,
+        usage: run.usage,
+        sources: run.contextSnapshot.sources.length,
+        truncated: stopReason === "max_tokens",
+      }));
+      setSession((st) => ({ turns: [...st.turns, { task: text, output: out }].slice(-8) }));
     } catch (e) {
       if (e instanceof ApiError && e.kind === "aborted") {
         patch(id, () => ({ status: "stopped" }));
       } else {
         if (e instanceof ApiError && e.kind === "auth") onAuthError();
         patch(id, () => ({ status: "error", error: e instanceof Error ? e.message : String(e) }));
-        setTask((t) => t || text);
+        setSession((st) => ({ task: st.task || text }));
       }
     } finally {
       setBusy(false);
@@ -94,7 +119,8 @@ export function WorkScreen({ token, onAuthError, onSpent }: Props) {
     }
   }
 
-  const fragTokens = estimateTokens(frag + task);
+  const est = resolved ? estimateRun(docsAgent, resolved, session.task) : null;
+  const chipText = resolved && est ? `${resolved.packet.sources.length} ${plural(resolved.packet.sources.length, "джерело", "джерела", "джерел")} · ≈${tk(est.tokens)} ток. · ${approx(est.costUsd)}` : "Збираю контекст…";
 
   return (
     <div className="work">
@@ -106,7 +132,7 @@ export function WorkScreen({ token, onAuthError, onSpent }: Props) {
             <p>Введіть задачу внизу або почніть із прикладу:</p>
             <div className="exs">
               {docsAgent.examples.map((x) => (
-                <button key={x} className="ex" onClick={() => setTask(x)}>
+                <button key={x} className="ex" onClick={() => setSession({ task: x })}>
                   {x}
                 </button>
               ))}
@@ -142,6 +168,7 @@ export function WorkScreen({ token, onAuthError, onSpent }: Props) {
                 <p className="note mx tnum">
                   вхід {fmt(it.usage.input)} · вихід {fmt(it.usage.output)}
                   {it.usage.cacheRead ? ` · з кешу ${fmt(it.usage.cacheRead)}` : ""} · {money(it.usage.costUsd)}
+                  {it.sources !== undefined ? ` · джерел контексту ${it.sources}` : ""}
                 </p>
               )}
               {it.status === "done" && (
@@ -150,6 +177,10 @@ export function WorkScreen({ token, onAuthError, onSpent }: Props) {
                     <Icon name={it.saved ? "check" : "save"} size={18} />
                     {it.saved ? "Збережено" : "Зберегти"}
                   </button>
+                  <button className="btn" onClick={() => setRemember(it)}>
+                    <Icon name="remember" size={18} />
+                    Запам'ятати
+                  </button>
                   <button className="btn sq" aria-label="Копіювати" onClick={() => copy(it.output)}>
                     <Icon name="copy" size={18} />
                   </button>
@@ -157,7 +188,7 @@ export function WorkScreen({ token, onAuthError, onSpent }: Props) {
                     className="btn sq"
                     aria-label="Використати як фрагмент"
                     onClick={() => {
-                      setFrag(it.output);
+                      setSession({ frag: it.output });
                       setFragOpen(true);
                       toast("Відповідь стала фрагментом для наступної задачі");
                     }}
@@ -176,25 +207,27 @@ export function WorkScreen({ token, onAuthError, onSpent }: Props) {
           <textarea
             className="field frag"
             rows={5}
-            value={frag}
-            onChange={(e) => setFrag(e.target.value)}
+            value={session.frag}
+            onChange={(e) => setSession({ frag: e.target.value })}
             placeholder="Вставте текст, з яким працює агент"
             aria-label="Фрагмент тексту"
           />
         )}
-        <button className="chip" onClick={() => setFragOpen((o) => !o)} aria-expanded={fragOpen}>
-          <span className="tnum">
-            {frag.trim() ? `Фрагмент: ${fmt(frag.length)} симв.` : "Додати фрагмент"} · запит ≈{fmt(fragTokens)} ток.
-          </span>
+        <button className="chip" onClick={onOpenContext} aria-label="Відкрити контекст запуску">
+          <span className="tnum">{chipText}</span>
           <Icon name="right" size={16} />
         </button>
         <div className="inrow">
+          <button className="clipbtn" aria-pressed={fragOpen} aria-label="Фрагмент тексту" onClick={() => setFragOpen((o) => !o)}>
+            <Icon name="clip" size={22} />
+            {session.frag.trim() && <i className="dotmark" />}
+          </button>
           <input
             type="text"
             enterKeyHint="send"
             autoComplete="off"
-            value={task}
-            onChange={(e) => setTask(e.target.value)}
+            value={session.task}
+            onChange={(e) => setSession({ task: e.target.value })}
             onKeyDown={(e) => e.key === "Enter" && send()}
             placeholder={docsAgent.examples[0]}
             aria-label="Задача для агента"
@@ -204,12 +237,28 @@ export function WorkScreen({ token, onAuthError, onSpent }: Props) {
               <Icon name="stop" />
             </button>
           ) : (
-            <button className="go" onClick={send} disabled={!task.trim()} aria-label="Запустити">
+            <button className="go" onClick={send} disabled={!session.task.trim()} aria-label="Запустити">
               <Icon name="play" />
             </button>
           )}
         </div>
       </div>
+
+      <Sheet open={remember !== null} title="Запам'ятати факт" onClose={() => setRemember(null)}>
+        {remember && (
+          <FactForm
+            initial={{ text: remember.output.trim().slice(0, 500), tags: [], pinned: false }}
+            hint="Залиште один факт: коротко й так, щоб він був зрозумілий без контексту. Він потрапить у пам'ять лише після вашого підтвердження."
+            submitLabel="Запам'ятати"
+            onCancel={() => setRemember(null)}
+            onSubmit={async (v) => {
+              await addMemory({ ...v, source: "agent" });
+              setRemember(null);
+              toast("Факт додано в пам'ять");
+            }}
+          />
+        )}
+      </Sheet>
     </div>
   );
 }

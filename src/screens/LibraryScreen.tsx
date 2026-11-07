@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { setSession } from "../core/session";
 import { db } from "../db/db";
 import { useLive } from "../db/useLive";
 import { Icon } from "../ui/Icon";
@@ -58,6 +59,16 @@ export function LibraryScreen() {
                       </button>
                       <button
                         className="btn"
+                        onClick={() => {
+                          setSession((st) => (st.extraArtifactIds.includes(a.id) ? {} : { extraArtifactIds: [...st.extraArtifactIds, a.id] }));
+                          toast("Додано до контексту наступного запуску");
+                        }}
+                      >
+                        <Icon name="tCtx" size={18} />
+                        В контекст
+                      </button>
+                      <button
+                        className="btn"
                         onClick={async () => {
                           if (confirm(`Видалити «${a.title}»? Дію не можна скасувати.`)) {
                             await db.artifacts.delete(a.id);
@@ -98,6 +109,16 @@ export function LibraryScreen() {
                     <p className="note mx tnum">
                       вхід {r.usage.input} · вихід {r.usage.output} · джерел контексту {r.contextSnapshot.sources.length}
                     </p>
+                    {r.contextSnapshot.sources.length > 0 && (
+                      <div className="chips mx">
+                        {r.contextSnapshot.sources.map((src) => (
+                          <span key={src.id}>
+                            {src.title}
+                            {src.tokens !== undefined ? ` · ${src.tokens}` : ""}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     <div className="ptext">{r.output}</div>
                   </>
                 )}
