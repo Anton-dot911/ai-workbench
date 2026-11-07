@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { docsAgent } from "./agents/docs";
+import { getAgent } from "./agents/registry";
 import { ApiError, getStatus, type StatusResponse } from "./core/claude";
 import { resolveContext, type Resolved } from "./core/contextBuilder";
 import { setPrices } from "./core/prices";
@@ -12,6 +12,7 @@ import { LibraryScreen } from "./screens/LibraryScreen";
 import { MemoryScreen } from "./screens/MemoryScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { WorkScreen } from "./screens/WorkScreen";
+import { AgentSheet } from "./ui/AgentSheet";
 import { Icon, type IconName } from "./ui/Icon";
 import { Toaster, toast } from "./ui/toast";
 
@@ -26,13 +27,13 @@ const TABS: { id: Tab; label: string; icon: IconName }[] = [
   { id: "settings", label: "Параметри", icon: "tSet" },
 ];
 
-const HEAD: Record<Tab, { title: string; sub: string }> = {
-  work: { title: docsAgent.name, sub: docsAgent.subtitle },
-  ctx: { title: "Контекст запуску", sub: `Що отримає «${docsAgent.name}»` },
+const staticHead = (name: string, sub: string): Record<Tab, { title: string; sub: string }> => ({
+  work: { title: name, sub },
+  ctx: { title: "Контекст запуску", sub: `Що отримає «${name}»` },
   library: { title: "Бібліотека", sub: "Збережені результати й журнал запусків" },
   memory: { title: "Пам'ять", sub: "Профіль і факти для всіх агентів" },
   settings: { title: "Налаштування", sub: "Витрати, дані, доступ" },
-};
+});
 
 export default function App() {
   const [token, setTokenState] = useState(getToken());
@@ -40,7 +41,9 @@ export default function App() {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [statusError, setStatusError] = useState("");
   const [resolved, setResolved] = useState<Resolved | null>(null);
+  const [agentOpen, setAgentOpen] = useState(false);
   const session = useSession();
+  const agent = getAgent(session.agentId);
   const dataVersion = useDataVersion();
 
   const logout = useCallback(() => {
@@ -76,7 +79,7 @@ export default function App() {
     if (!token) return;
     let dead = false;
     const t = setTimeout(() => {
-      resolveContext(docsAgent, sessionTask(session))
+      resolveContext(agent, sessionTask(session))
         .then((r) => !dead && setResolved(r))
         .catch((e) => console.error(e));
     }, 250);
@@ -84,20 +87,27 @@ export default function App() {
       dead = true;
       clearTimeout(t);
     };
-  }, [token, session.task, session.frag, session.turns, session.toggles, session.extraArtifactIds, dataVersion]);
+  }, [token, agent, session.task, session.frag, session.turns, session.toggles, session.extraArtifactIds, dataVersion]);
 
   if (!token) return <Gate onToken={setTokenState} />;
 
-  const head = HEAD[tab];
+  const head = staticHead(agent.name, agent.subtitle)[tab];
   const screen = (id: Tab) => "screen" + (tab === id ? " on" : "");
   return (
     <div className="app">
       <header className="top">
         <div>
-          <h1>{head.title}</h1>
+          {tab === "work" ? (
+            <button className="agentbtn" onClick={() => setAgentOpen(true)} aria-label={`Агент: ${agent.name}. Змінити`}>
+              <h1>{head.title}</h1>
+              <Icon name="chevd" size={22} />
+            </button>
+          ) : (
+            <h1>{head.title}</h1>
+          )}
           <p>{head.sub}</p>
         </div>
-        {(tab === "work" || tab === "ctx") && <span className="pill">{docsAgent.model}</span>}
+        {(tab === "work" || tab === "ctx") && <span className="pill">{agent.model}</span>}
       </header>
 
       <main>
@@ -106,7 +116,7 @@ export default function App() {
         </section>
         <section className={screen("ctx")} aria-label="Контекст">
           <ContextScreen
-            agent={docsAgent}
+            agent={agent}
             resolved={resolved}
             onRun={() => {
               if (!session.task.trim()) {
@@ -138,6 +148,16 @@ export default function App() {
           </button>
         ))}
       </nav>
+      <AgentSheet
+        open={agentOpen}
+        current={agent.id}
+        onClose={() => setAgentOpen(false)}
+        onPick={(id) => {
+          setSession({ agentId: id });
+          setAgentOpen(false);
+          toast(`Агент: ${getAgent(id).name}`);
+        }}
+      />
       <div id="sheet-root" />
       <Toaster />
     </div>

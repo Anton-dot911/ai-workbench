@@ -203,3 +203,35 @@ textarea.field { resize: vertical; line-height: 1.4; }
 .sheet .lib { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 60px; padding: 8px 0; border-top: 1px solid var(--line); }
 .sheet .lib .t { flex: 1; min-width: 0; }
 .sheet .field + .lib { margin-top: 8px; }
+
+/* ---- етап 3a: агенти, diff, інструменти, версії ---- */
+.agentbtn { display: inline-flex; align-items: center; gap: 6px; color: inherit; }
+.agentbtn h1 { margin: 0; }
+.alist { display: grid; gap: 8px; margin: 6px 0 0; padding: 0; }
+.agent { display: grid; grid-template-columns: 44px 1fr auto; gap: 12px; align-items: center; width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.agent[aria-current="true"] { border-color: var(--brand); box-shadow: inset 4px 0 0 var(--signal); }
+.aico { width: 44px; height: 44px; border-radius: 10px; background: var(--brand); color: var(--on-brand); display: grid; place-items: center; }
+.aname { display: block; font: 600 20px/1.1 var(--label); }
+.adesc { display: block; margin-top: 3px; color: var(--ink2); font-size: 14.5px; }
+
+.toolrow { padding: 10px 14px 0; margin-bottom: 0; }
+.tool { font-size: 13px; }
+.tool.ok { color: var(--ok); }
+.tool.error { color: var(--bad); }
+
+.edits { display: grid; gap: 8px; margin: 8px 0 4px; }
+.edit { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; background: var(--raised); border: 1px solid var(--line); }
+.edit.bad { opacity: 0.7; }
+.edit input { width: 24px; height: 24px; margin-top: 2px; accent-color: var(--brand); flex: none; }
+.ebody { display: grid; gap: 4px; min-width: 0; flex: 1; font-family: var(--read); font-size: 16px; overflow-wrap: anywhere; }
+.ebody .dt { font-family: var(--ui); }
+.ebody del, .ebody ins, .ebody .anchor { display: block; padding: 3px 6px; border-radius: 4px; text-decoration: none; white-space: pre-wrap; }
+.ebody del { background: var(--bad-bg); color: var(--bad); text-decoration: line-through; }
+.ebody ins { background: rgba(27, 122, 87, 0.16); color: var(--ok); }
+.ebody .anchor { background: var(--paper); color: var(--ink2); }
+.ebody .err { font-family: var(--ui); font-size: 13.5px; color: var(--bad); }
+.askq { margin: 0 0 10px; font: 18px/1.4 var(--read); }
+.sheet .ex { width: 100%; margin-bottom: 8px; text-align: left; }
+
+.versions { margin: 4px 14px 0; }
+.vrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; border-top: 1px solid var(--line); font-size: 14.5px; }
