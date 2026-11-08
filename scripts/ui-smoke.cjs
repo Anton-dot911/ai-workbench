@@ -173,6 +173,46 @@ const check = (name, cond, extra = "") => { console.log((cond ? "PASS" : "FAIL")
   check("у картці є мітка інструмента й підсумок", qa(".tool.ok").some((e) => e.textContent.includes("правки")) && !!byText(".ptext", "Виправляю."));
   check("шторка закрилась, запуск завершено", !q(".sheet.on") && !q(".go.stop"));
 
+  // Етап 3b: «Перевірка» → виправлення з diff; «Пости» → варіанти, лінійка, збереження, передача в перевірку
+  await tab("Робота");
+  const lastCard = () => [...q("section[aria-label=\"Робота\"]").querySelectorAll("section.card")].at(-1);
+  const inCard = (t) => [...lastCard().querySelectorAll("button")].find((b) => b.textContent.includes(t));
+  setVal(q("textarea.frag"), "Текст у рамках проєкту та даний документ."); await sleep(40);
+  nextTool = { name: "submit_review", input: { verdict: "needs_changes", score: 6, summary: "Є калька і канцелярит", issues: [
+    { severity: "low", category: "style", quote: "даний документ", problem: "канцелярит", suggestion: "цей документ" },
+    { severity: "medium", category: "language", quote: "у рамках", problem: "калька", suggestion: "у межах", replacement: "у межах" },
+  ] } };
+  setVal(taskInput(), "/перевір language"); await sleep(60); q(".go").click(); await sleep(900);
+  check("агент перемкнувся на «Перевірку» командою", q(".agentbtn h1").textContent === "Перевірка");
+  check("запит примушує завершальний інструмент", posts.at(-1).tool_choice?.name === "submit_review" && posts.at(-1).tools.length === 1, JSON.stringify(posts.at(-1).tool_choice));
+  check("картка перевірки: вердикт, оцінка, зауваження", /Потрібні правки/.test(lastCard().textContent) && /оцінка 6 \/ 10/.test(lastCard().textContent) && qa(".iss").length >= 2);
+  check("серйозніше зауваження першим", qa(".iss")[0].classList.contains("medium"));
+  const fixBtn = inCard("Застосувати виправлення (1)");
+  check("кнопка виправлень рахує лише зауваження з готовою заміною", !!fixBtn);
+  fixBtn.click(); await sleep(300);
+  check("виправлення відкривають diff-шторку", /Підтвердьте зміни/.test(q(".sheet.on")?.textContent ?? "") && qa(".sheet.on .edit").length === 1);
+  byText(".sheet.on button", "Застосувати (1)").click(); await sleep(500);
+  check("виправлення застосовано до фрагмента", q("textarea.frag").value === "Текст у межах проєкту та даний документ.", q("textarea.frag").value);
+
+  nextTool = { name: "submit_posts", input: { platform: "linkedin", variants: [
+    { text: "Перший варіант поста про PWA і офлайн.", hashtags: ["PWA", "offline", "webdev"] },
+    { text: "Другий варіант: що працює без мережі.", hashtags: ["PWA", "offline", "webdev"] },
+  ] } };
+  setVal(taskInput(), "/пост linkedin: PWA"); await sleep(60); q(".go").click(); await sleep(900);
+  check("агент «Пости»: картка з варіантами", q(".agentbtn h1").textContent === "Пости" && lastCard().querySelectorAll(".vt button").length === 2);
+  check("лінійка й лічильник за правилами LinkedIn", /\/ 3\s000 симв\./.test(lastCard().textContent) && !!lastCard().querySelector(".gauge") && /У межах правил LinkedIn/.test(lastCard().textContent));
+  check("хештеги показані окремо й нормалізовані", [...lastCard().querySelectorAll(".tags span")].map((e) => e.textContent).join(",") === "#PWA,#offline,#webdev");
+  [...lastCard().querySelectorAll(".vt button")][1].click(); await sleep(60);
+  check("перемикання на варіант 2", /Другий варіант/.test(lastCard().querySelector(".ptext").textContent));
+  inCard("Зберегти").click(); await sleep(300);
+  check("варіант збережено як пост", /Збережено в бібліотеці як пост/.test(q(".toast").textContent) && !!inCard("Збережено"));
+  inCard("Перевірити").click(); await sleep(150);
+  check("«Перевірити» передає варіант у агента «Перевірка»", q(".agentbtn h1").textContent === "Перевірка" && /Другий варіант/.test(q("textarea.frag").value) && /#PWA/.test(q("textarea.frag").value));
+  await tab("Бібліотека");
+  check("у бібліотеці є артефакт-пост", qa(".itemhead .nm").some((e) => /Другий варіант/.test(e.textContent)));
+  await tab("Робота");
+  setVal(taskInput(), ""); await sleep(30);
+
   // Імпорт бази: Пам'ять → імпорт пакета
   await tab("Параметри");
   check("параметри показують режим і адресу", /вкладка браузера · app\.test/.test(q("section[aria-label=Налаштування]").textContent), q("section[aria-label=Налаштування]").textContent.match(/Зараз:[^\n]*/)?.[0]);
