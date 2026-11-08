@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { getAgent } from "../agents/registry";
 import { setSession } from "../core/session";
 import { db } from "../db/db";
 import { useLive } from "../db/useLive";
@@ -52,6 +53,36 @@ export function LibraryScreen() {
                 {open === a.id && (
                   <>
                     <div className="ptext">{a.content}</div>
+                    {a.versions.length > 1 && (
+                      <div className="versions">
+                        <span className="dt">Версії · {a.versions.length}</span>
+                        {[...a.versions].reverse().map((v, k) => (
+                          <div key={v.at + "-" + k} className="vrow">
+                            <span className="tnum">
+                              {when(v.at)} · {v.content.length} симв.{k === 0 ? " · поточна" : ""}
+                            </span>
+                            {k > 0 && (
+                              <button
+                                className="btn sq"
+                                onClick={async () => {
+                                  if (!confirm("Відкотити до цієї версії? Поточна лишиться в історії.")) return;
+                                  const now = Date.now();
+                                  await db.artifacts.update(a.id, {
+                                    content: v.content,
+                                    summary: v.content.replace(/\s+/g, " ").trim().slice(0, 200),
+                                    versions: [...a.versions, { at: now, content: v.content }],
+                                    updatedAt: now,
+                                  });
+                                  toast("Відкочено");
+                                }}
+                              >
+                                Відкотити
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     <div className="acts">
                       <button className="btn" onClick={() => copy(a.content)}>
                         <Icon name="copy" size={18} />
@@ -97,7 +128,7 @@ export function LibraryScreen() {
                 <button className="itemhead" onClick={() => toggle(r.id)} aria-expanded={open === r.id}>
                   <span className="t">
                     <span className="nm">{r.input.slice(0, 60)}</span>
-                    <span className="dt">{when(r.createdAt)} · {r.agentId}</span>
+                    <span className="dt">{when(r.createdAt)} · {getAgent(r.agentId).name}</span>
                   </span>
                   <span className="tkn">{money(r.usage.costUsd)}</span>
                   <span className={"chev" + (open === r.id ? " open" : "")}>
@@ -108,6 +139,8 @@ export function LibraryScreen() {
                   <>
                     <p className="note mx tnum">
                       вхід {r.usage.input} · вихід {r.usage.output} · джерел контексту {r.contextSnapshot.sources.length}
+                      {r.steps && r.steps > 1 ? ` · кроків ${r.steps}` : ""}
+                      {r.toolCalls?.length ? ` · інструменти: ${r.toolCalls.map((t) => t.name + (t.ok ? "" : "✕")).join(", ")}` : ""}
                     </p>
                     {r.contextSnapshot.sources.length > 0 && (
                       <div className="chips mx">

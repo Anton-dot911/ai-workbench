@@ -1,30 +1,46 @@
 import { useEffect, useRef, useState } from "react";
-import { docsAgent } from "../agents/docs";
+import { AGENTS, getAgent, parseCommand } from "../agents/registry";
 import { ApiError } from "../core/claude";
 import type { Resolved } from "../core/contextBuilder";
 import { estimateRun } from "../core/estimate";
-import { runAgent } from "../core/runner";
+import { runAgent, type ToolEvent } from "../core/runner";
 import { getSession, sessionTask, setSession, useSession } from "../core/session";
 import { addMemory, db, saveRunAsArtifact } from "../db/db";
+import type { AskRequest, ConfirmDecision, ConfirmRequest } from "../tools/types";
+import { AskSheet } from "../ui/AskSheet";
+import { ConfirmSheet } from "../ui/ConfirmSheet";
 import { FactForm } from "../ui/FactForm";
 import { Icon } from "../ui/Icon";
 import { Sheet } from "../ui/Sheet";
 import { approx, fmt, money, plural, tk } from "../ui/format";
 import { toast } from "../ui/toast";
 
+const TOOL_LABEL: Record<string, string> = {
+  apply_edits: "правки",
+  search_context: "пошук у пам'яті",
+  read_artifact: "читання документа",
+  save_artifact: "збереження",
+  ask_user: "питання",
+};
+
 interface FeedItem {
   id: string;
+  agentName: string;
   task: string;
   selection?: string;
   output: string;
   status: "running" | "done" | "stopped" | "error";
   error?: string;
   truncated?: boolean;
+  tools: { name: string; status: ToolEvent["status"] }[];
   usage?: { input: number; output: number; cacheRead: number; costUsd: number };
+  steps?: number;
   sources?: number;
   runId?: string;
   saved?: boolean;
 }
+
+type Pending = { kind: "confirm"; req: ConfirmRequest; resolve: (d: ConfirmDecision) => void } | { kind: "ask"; req: AskRequest; resolve: (a: string) => void };
 
 interface Props {
   token: string;
@@ -36,10 +52,12 @@ interface Props {
 
 export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContext }: Props) {
   const session = useSession();
+  const agent = getAgent(session.agentId);
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [fragOpen, setFragOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [remember, setRemember] = useState<FeedItem | null>(null);
+  const [pending, setPending] = useState<Pending | null>(null);
   const abort = useRef<AbortController | null>(null);
   const feedRef = useRef<HTMLDivElement>(null);
   const lastNonce = useRef(session.runNonce);
@@ -61,27 +79,60 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.runNonce]);
 
+  function stop() {
+    // Якщо агент чекає на підтвердження чи відповідь, відпускаємо його, щоб запуск міг завершитися.
+    if (pending?.kind === "confirm") pending.resolve({ approve: false });
+    if (pending?.kind === "ask") pending.resolve("");
+    setPending(null);
+    abort.current?.abort();
+  }
+
   async function send() {
     const s = getSession();
-    const text = s.task.trim();
+    let text = s.task.trim();
     if (!text || busy) return;
-    const task = sessionTask(s);
+
+    let ag = getAgent(s.agentId);
+    if (text.startsWith("/")) {
+      const cmd = parseCommand(text);
+      if (!cmd) {
+        toast(`Невідома команда. Доступні: ${AGENTS.flatMap((a) => a.commands.slice(0, 1)).join(", ")}`);
+        return;
+      }
+      ag = cmd.agent;
+      setSession({ agentId: ag.id });
+      text = cmd.rest;
+      if (!text) {
+        setSession({ task: "" });
+        toast(`Агент: ${ag.name}`);
+        return;
+      }
+    }
+
+    const task = sessionTask({ ...s, task: text });
     const id = crypto.randomUUID();
-    setFeed((f) => [...f, { id, task: text, selection: task.selection, output: "", status: "running" }]);
+    setFeed((f) => [...f, { id, agentName: ag.name, task: text, selection: task.selection, output: "", status: "running", tools: [] }]);
     setSession({ task: "" });
     setBusy(true);
     const ac = new AbortController();
     abort.current = ac;
     try {
-      const { run, text: out, stopReason } = await runAgent(docsAgent, task, {
+      const { run, text: out, stopReason } = await runAgent(ag, task, {
         token,
         signal: ac.signal,
         onText: (d) => patch(id, (i) => ({ output: i.output + d })),
+        onTool: (e) =>
+          patch(id, (i) => ({
+            tools: e.status === "start" ? [...i.tools, { name: e.name, status: "start" }] : i.tools.map((t, k) => (k === i.tools.length - 1 && t.name === e.name ? { ...t, status: e.status } : t)),
+          })),
+        confirm: (req) => new Promise<ConfirmDecision>((resolve) => setPending({ kind: "confirm", req, resolve })),
+        ask: (req) => new Promise<string>((resolve) => setPending({ kind: "ask", req, resolve })),
       });
       patch(id, () => ({
         status: "done",
         runId: run.id,
         usage: run.usage,
+        steps: run.steps,
         sources: run.contextSnapshot.sources.length,
         truncated: stopReason === "max_tokens",
       }));
@@ -97,6 +148,7 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
     } finally {
       setBusy(false);
       abort.current = null;
+      setPending(null);
       onSpent();
     }
   }
@@ -105,7 +157,7 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
     if (!item.runId) return;
     const run = await db.runs.get(item.runId);
     if (!run) return;
-    await saveRunAsArtifact(run, docsAgent.output.saveAs ?? "document");
+    await saveRunAsArtifact(run, agent.output.saveAs ?? "document");
     patch(item.id, () => ({ saved: true }));
     toast("Збережено в бібліотеці");
   }
@@ -119,24 +171,28 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
     }
   }
 
-  const est = resolved ? estimateRun(docsAgent, resolved, session.task) : null;
-  const chipText = resolved && est ? `${resolved.packet.sources.length} ${plural(resolved.packet.sources.length, "джерело", "джерела", "джерел")} · ≈${tk(est.tokens)} ток. · ${approx(est.costUsd)}` : "Збираю контекст…";
+  const est = resolved ? estimateRun(agent, resolved, session.task) : null;
+  const n = resolved?.packet.sources.length ?? 0;
+  const chipText = resolved && est ? `${n} ${plural(n, "джерело", "джерела", "джерел")} · ≈${tk(est.tokens)} ток. · ${approx(est.costUsd)}` : "Збираю контекст…";
 
   return (
     <div className="work">
       <div className="feed" ref={feedRef}>
         {feed.length === 0 && (
           <div className="empty">
-            <h2>{docsAgent.name}</h2>
-            <p>{docsAgent.description}</p>
+            <h2>{agent.name}</h2>
+            <p>{agent.description}</p>
             <p>Введіть задачу внизу або почніть із прикладу:</p>
             <div className="exs">
-              {docsAgent.examples.map((x) => (
+              {agent.examples.map((x) => (
                 <button key={x} className="ex" onClick={() => setSession({ task: x })}>
                   {x}
                 </button>
               ))}
             </div>
+            <p className="note">
+              Змінити агента: тап по заголовку або команда на початку задачі ({agent.commands[0]}).
+            </p>
           </div>
         )}
 
@@ -146,7 +202,18 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
               <span>{it.task}</span>
             </div>
             {it.selection && <p className="note right">з фрагментом, {fmt(it.selection.length)} симв.</p>}
+            {AGENTS.length > 1 && <p className="note right">{it.agentName}</p>}
             <section className="card" aria-label="Відповідь агента">
+              {it.tools.length > 0 && (
+                <div className="chips toolrow">
+                  {it.tools.map((t, k) => (
+                    <span key={k} className={"tool " + t.status}>
+                      {t.status === "ok" ? "✓ " : t.status === "error" ? "✕ " : "… "}
+                      {TOOL_LABEL[t.name] ?? t.name}
+                    </span>
+                  ))}
+                </div>
+              )}
               {it.status === "running" && !it.output ? (
                 <div className="wait" aria-label="Агент працює">
                   <i />
@@ -169,6 +236,7 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
                   вхід {fmt(it.usage.input)} · вихід {fmt(it.usage.output)}
                   {it.usage.cacheRead ? ` · з кешу ${fmt(it.usage.cacheRead)}` : ""} · {money(it.usage.costUsd)}
                   {it.sources !== undefined ? ` · джерел контексту ${it.sources}` : ""}
+                  {it.steps && it.steps > 1 ? ` · кроків ${it.steps}` : ""}
                 </p>
               )}
               {it.status === "done" && (
@@ -229,11 +297,11 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
             value={session.task}
             onChange={(e) => setSession({ task: e.target.value })}
             onKeyDown={(e) => e.key === "Enter" && send()}
-            placeholder={docsAgent.examples[0]}
+            placeholder={agent.examples[0]}
             aria-label="Задача для агента"
           />
           {busy ? (
-            <button className="go stop" onClick={() => abort.current?.abort()} aria-label="Зупинити">
+            <button className="go stop" onClick={stop} aria-label="Зупинити">
               <Icon name="stop" />
             </button>
           ) : (
@@ -243,6 +311,21 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
           )}
         </div>
       </div>
+
+      <ConfirmSheet
+        req={pending?.kind === "confirm" ? pending.req : null}
+        onDecision={(d) => {
+          if (pending?.kind === "confirm") pending.resolve(d);
+          setPending(null);
+        }}
+      />
+      <AskSheet
+        req={pending?.kind === "ask" ? pending.req : null}
+        onAnswer={(a) => {
+          if (pending?.kind === "ask") pending.resolve(a);
+          setPending(null);
+        }}
+      />
 
       <Sheet open={remember !== null} title="Запам'ятати факт" onClose={() => setRemember(null)}>
         {remember && (
