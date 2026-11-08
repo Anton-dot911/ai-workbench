@@ -239,3 +239,32 @@ textarea.field { resize: vertical; line-height: 1.4; }
 /* ---- імпорт ---- */
 .filebtn { position: relative; width: 100%; justify-content: center; overflow: hidden; }
 .filebtn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; font-size: 0; }
+
+/* ---- етап 3b: картки «Перевірка» і «Пости» ---- */
+.rv { padding: 14px; }
+.rvh { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.rvh strong { font: 600 20px/1.1 var(--label); }
+.okc { color: var(--ok); }
+.badc { color: var(--ink); }
+.iss { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--raised); border-left: 4px solid var(--line); }
+.iss.high { border-left-color: var(--bad); }
+.iss.medium { border-left-color: var(--signal); }
+.iss .meta { font-size: 13.5px; color: var(--ink2); }
+.iss q { display: block; margin: 4px 0; font: 16px/1.4 var(--read); quotes: none; }
+.iss p { margin: 3px 0 0; font-size: 15.5px; }
+.iss .sugg { color: var(--ink2); }
+.iss .repl ins { text-decoration: none; padding: 1px 6px; border-radius: 4px; background: rgba(27, 122, 87, 0.16); color: var(--ok); font-family: var(--read); }
+
+.vt { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 12px 14px 0; }
+.vt button { min-height: 36px; padding: 6px 13px; border-radius: 99px; border: 1px solid var(--line); font-size: 14.5px; }
+.vt button[aria-selected="true"] { background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
+.hook { background: rgba(242, 194, 48, 0.38); border-radius: 3px; }
+.tags { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 14px; }
+.tags span { color: var(--brand); font-size: 15.5px; }
+@media (prefers-color-scheme: dark) { .tags span { color: #8fb0e8; } }
+.gwrap { padding: 12px 14px 4px; }
+.gnum { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px; font-size: 14.5px; }
+.gnum span:last-child { color: var(--ink2); }
+.pstatus { padding: 4px 14px 2px; }
+.ok { margin: 4px 0; color: var(--ok); font-size: 15px; }
+.pstatus .warn { margin: 6px 0; }
