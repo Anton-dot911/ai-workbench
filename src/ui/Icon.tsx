@@ -13,6 +13,7 @@ const P = {
   trash: '<path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/>',
   down: '<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>',
   reuse: '<path d="M4 8h12l-3-3M20 16H8l3 3"/>',
+  chevd: '<path d="M6 9l6 6 6-6"/>',
   tCtx: '<path d="M12 4l8 4-8 4-8-4z"/><path d="M4 12l8 4 8-4M4 16l8 4 8-4"/>',
   tMem: '<path d="M7 4h10v16l-5-4-5 4z"/>',
   lock: '<rect x="6" y="11" width="12" height="9" rx="2"/><path d="M9 11V8a3 3 0 016 0v3"/>',
@@ -25,6 +26,7 @@ const P = {
 } as const;
 
 export type IconName = keyof typeof P;
+export const isIconName = (n: string): n is IconName => n in P;
 
 export function Icon({ name, size = 22 }: { name: IconName; size?: number }) {
   return (
