@@ -1,9 +1,11 @@
 import { z } from "zod";
+import { ReviewIssue } from "../agents/outputs";
+import { checkVariant, normalizeTag, PLATFORMS, PLATFORM_IDS, type PlatformId } from "../agents/platforms";
 import { retrieve } from "../core/retrieval";
 import { getSession, setSession } from "../core/session";
 import type { ToolDef } from "../core/types";
 import { db } from "../db/db";
-import { applyEdits, isReplace, type Edit } from "./edits";
+import { applyEdits, countOccurrences, isReplace, type Edit } from "./edits";
 import type { EditPreview, ToolHandler } from "./types";
 
 const clip = (s: string, max = 30_000): string => (s.length > max ? s.slice(0, max) + "\n[…відповідь обрізано…]" : s);
@@ -265,3 +267,115 @@ export const toolDefs = (...names: string[]): ToolDef[] =>
     if (!h) throw new Error(`Невідомий інструмент: ${n}`);
     return h.def;
   });
+
+// ---------- submit_review (завершальний інструмент агента «Перевірка») ----------
+
+const ReviewInput = z.object({
+  verdict: z.enum(["ok", "needs_changes"]),
+  score: z.number().int().min(0).max(10),
+  summary: z.string().min(1),
+  issues: z.array(ReviewIssue).max(40),
+});
+
+const submitReview: ToolHandler = {
+  terminal: true,
+  def: {
+    name: "submit_review",
+    description:
+      "Передає результат перевірки. Обов'язково викликається один раз наприкінці. quote: дослівна коротка цитата з перевіреного тексту. replacement: точний текст, яким замінити quote, лише якщо правка механічна (інакше не вказуй).",
+    input_schema: {
+      type: "object",
+      properties: {
+        verdict: { type: "string", enum: ["ok", "needs_changes"] },
+        score: { type: "integer", minimum: 0, maximum: 10, description: "Загальна оцінка якості, 10 найкраще" },
+        summary: { type: "string", description: "1–2 речення підсумку" },
+        issues: {
+          type: "array",
+          maxItems: 40,
+          items: {
+            type: "object",
+            properties: {
+              severity: { type: "string", enum: ["high", "medium", "low"] },
+              category: { type: "string", enum: ["language", "facts", "logic", "style", "code", "brief"] },
+              quote: { type: "string", description: "Дослівна цитата з тексту (до 200 символів)" },
+              problem: { type: "string" },
+              suggestion: { type: "string", description: "Що зробити" },
+              replacement: { type: "string", description: "Точна заміна для quote, якщо правка механічна" },
+              source: { type: "string", description: "Джерело, якщо твердження перевірялось" },
+            },
+            required: ["severity", "category", "quote", "problem", "suggestion"],
+          },
+        },
+      },
+      required: ["verdict", "score", "summary", "issues"],
+    },
+  },
+  async run(input, ctx) {
+    const p = ReviewInput.parse(input);
+    const text = getSession().frag;
+    const attempt = ctx.calls?.submit_review ?? 1;
+
+    // Заміни працюють лише з дослівними унікальними цитатами. Перший раз просимо виправитись, другий приймаємо без таких замін.
+    const bad = text ? p.issues.map((i, n) => ({ i, n })).filter(({ i }) => i.replacement !== undefined && countOccurrences(text, i.quote) !== 1) : [];
+    if (bad.length && attempt < 2) {
+      const list = bad.map(({ i, n }) => `№${n + 1} «${i.quote.slice(0, 60)}»`).join("; ");
+      return fail(`Цитати з replacement не знайдено в тексті дослівно або вони неоднозначні: ${list}. Візьми точні унікальні цитати або прибери replacement, і виклич submit_review ще раз.`);
+    }
+    const issues = p.issues.map((i, n) => (bad.some((b) => b.n === n) ? { ...i, replacement: undefined } : i));
+    const hasBlocking = issues.some((i) => i.severity !== "low");
+    return json({ ...p, issues, verdict: hasBlocking ? "needs_changes" : "ok" });
+  },
+};
+
+// ---------- submit_posts (завершальний інструмент агента «Пости») ----------
+const PostsInput = z.object({
+  platform: z.enum(PLATFORM_IDS as [PlatformId, ...PlatformId[]]),
+  variants: z.array(z.object({ text: z.string().min(1), hashtags: z.array(z.string()).default([]) })).min(1).max(5),
+});
+
+const submitPosts: ToolHandler = {
+  terminal: true,
+  def: {
+    name: "submit_posts",
+    description:
+      "Передає готові варіанти поста для однієї платформи. Обов'язково викликається один раз наприкінці. Довжину й хештеги перевіряє застосунок: якщо правила порушено, він поверне помилку з цифрами, і потрібно виправити.",
+    input_schema: {
+      type: "object",
+      properties: {
+        platform: { type: "string", enum: PLATFORM_IDS },
+        variants: {
+          type: "array",
+          minItems: 1,
+          maxItems: 5,
+          items: {
+            type: "object",
+            properties: {
+              text: { type: "string", description: "Текст поста без хештегів" },
+              hashtags: { type: "array", items: { type: "string" }, description: "Хештеги окремо, з # або без" },
+            },
+            required: ["text"],
+          },
+        },
+      },
+      required: ["platform", "variants"],
+    },
+  },
+  async run(input, ctx) {
+    const p = PostsInput.parse(input);
+    const attempt = ctx.calls?.submit_posts ?? 1;
+    const variants = p.variants.map((v) => {
+      const hashtags = [...new Set(v.hashtags.map(normalizeTag).filter((t) => t.length > 1))];
+      const c = checkVariant(p.platform, v.text, hashtags);
+      return { text: v.text.trim(), hashtags, charCount: c.count, ...(c.over ? { over: c.over } : {}), ...(c.tagIssue ? { tagIssue: c.tagIssue } : {}) };
+    });
+    const violations = variants.flatMap((v, n) => [v.over ? `варіант ${n + 1}: ${v.charCount} символів із ${PLATFORMS[p.platform].maxChars} (перевищено на ${v.over})` : "", v.tagIssue ? `варіант ${n + 1}: ${v.tagIssue}` : ""]).filter(Boolean);
+    // Один автоповтор: моделі погано рахують символи, тому довіряємо лише підрахунку коду.
+    if (violations.length && attempt < 2) {
+      return fail(`Правила ${PLATFORMS[p.platform].name} порушено: ${violations.join("; ")}. Скороти текст або виправ хештеги й виклич submit_posts ще раз. Рахуй символи разом із хештегами.`);
+    }
+    return json({ platform: p.platform, variants });
+  },
+};
+
+TOOL_HANDLERS[submitReview.def.name] = submitReview;
+TOOL_HANDLERS[submitPosts.def.name] = submitPosts;

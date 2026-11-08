@@ -30,6 +30,8 @@ export interface AskRequest {
 
 export interface ToolContext {
   signal?: AbortSignal;
+  /** Скільки разів у цьому запуску вже викликано кожен інструмент (включно з поточним викликом). */
+  calls?: Record<string, number>;
   ui: {
     confirm?: (r: ConfirmRequest) => Promise<ConfirmDecision>;
     ask?: (r: AskRequest) => Promise<string>;
@@ -50,6 +52,8 @@ export interface ToolResult {
 
 export interface ToolHandler {
   def: ToolDef;
+  /** Успішний виклик завершує запуск: його результат стає виходом агента. */
+  terminal?: boolean;
   plan?(input: unknown, ctx: ToolContext): Promise<ToolPlan>;
   run(input: unknown, ctx: ToolContext, decision?: ConfirmDecision): Promise<ToolResult>;
 }
