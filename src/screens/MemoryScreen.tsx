@@ -3,6 +3,7 @@ import { addMemory, db, getProfile, parseTags, saveProfile, updateMemory } from 
 import { useLive } from "../db/useLive";
 import type { MemoryItem, Profile } from "../core/types";
 import { FactForm } from "../ui/FactForm";
+import { ImportSheet } from "../ui/ImportSheet";
 import { Icon } from "../ui/Icon";
 import { Sheet } from "../ui/Sheet";
 import { when } from "../ui/format";
@@ -11,20 +12,37 @@ import { toast } from "../ui/toast";
 type ListKey = "expertise" | "brandWords" | "stack";
 const listOf = (p: Profile, k: ListKey): string[] => (k === "stack" ? p.codingPrefs?.stack ?? [] : (p[k] as string[] | undefined) ?? []);
 
-function ProfileCard({ initial }: { initial: Profile }) {
+/** Стабільний вигляд профілю для порівняння (порядок ключів не важливий). */
+const canon = (p: Profile): string =>
+  JSON.stringify(p, (_k, v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b))) : v));
+
+const rawLists = (p: Profile): Record<ListKey, string> => ({
+  expertise: listOf(p, "expertise").join(", "),
+  brandWords: listOf(p, "brandWords").join(", "),
+  stack: listOf(p, "stack").join(", "),
+});
+
+function ProfileCard({ initial, live }: { initial: Profile; live: Profile | null }) {
   const [p, setP] = useState<Profile>(initial);
-  const [raw, setRaw] = useState<Record<ListKey, string>>({
-    expertise: listOf(initial, "expertise").join(", "),
-    brandWords: listOf(initial, "brandWords").join(", "),
-    stack: listOf(initial, "stack").join(", "),
-  });
-  const saved = useRef(JSON.stringify(initial));
+  const [raw, setRaw] = useState<Record<ListKey, string>>(rawLists(initial));
+  const saved = useRef(canon(initial));
+
+  // Зміни профілю ззовні (імпорт) підхоплюються. Власні збереження не перезавантажують форму.
+  useEffect(() => {
+    if (!live) return;
+    const c = canon(live);
+    if (c !== saved.current) {
+      saved.current = c;
+      setP(live);
+      setRaw(rawLists(live));
+    }
+  }, [live]);
 
   async function commit(next: Profile) {
     setP(next);
-    const json = JSON.stringify(next);
-    if (json === saved.current) return;
-    saved.current = json;
+    const c = canon(next);
+    if (c === saved.current) return;
+    saved.current = c;
     await saveProfile(next);
     toast("Профіль збережено");
   }
@@ -84,6 +102,7 @@ export function MemoryScreen() {
   const facts = useLive(() => db.memory.toArray(), [] as MemoryItem[]);
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<MemoryItem | "new" | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
   // Форма профілю створюється один раз після завантаження, далі вона сама джерело правди.
   const [seed, setSeed] = useState<Profile | null>(null);
   useEffect(() => {
@@ -99,7 +118,7 @@ export function MemoryScreen() {
   return (
     <>
       <h2 className="sec first">Профіль</h2>
-      {seed ? <ProfileCard initial={seed} /> : <p className="note">Завантаження…</p>}
+      {seed ? <ProfileCard initial={seed} live={profile} /> : <p className="note">Завантаження…</p>}
       <p className="note">Профіль іде в кешований префікс кожного запиту. Замок «приховано» виключає поле з запитів.</p>
 
       <h2 className="sec">Факти · {facts.length}</h2>
@@ -115,7 +134,14 @@ export function MemoryScreen() {
       </div>
 
       {shown.length === 0 ? (
-        <p className="note">{facts.length ? "Нічого не знайдено." : "Поки порожньо. Додайте факт про себе, проєкти чи стиль. Агенти використовуватимуть його в запитах."}</p>
+        <>
+          <p className="note">{facts.length ? "Нічого не знайдено." : "Поки порожньо. Додайте факт про себе, проєкти чи стиль. Агенти використовуватимуть його в запитах."}</p>
+          {facts.length === 0 && (
+            <button className="btn" onClick={() => setImportOpen(true)}>
+              Імпортувати пакет (JSON)
+            </button>
+          )}
+        </>
       ) : (
         <div className="list">
           {shown.map((f) => (
@@ -156,6 +182,7 @@ export function MemoryScreen() {
         </div>
       )}
 
+      <ImportSheet open={importOpen} onClose={() => setImportOpen(false)} />
       <Sheet open={editing !== null} title={editing === "new" ? "Новий факт" : "Редагувати факт"} onClose={() => setEditing(null)}>
         <FactForm
           initial={editing && editing !== "new" ? { text: editing.text, tags: editing.tags, pinned: editing.pinned === 1 } : undefined}

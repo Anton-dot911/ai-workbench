@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { StatusResponse } from "../core/claude";
 import { MODEL_MAP } from "../core/settings";
 import { exportAll } from "../db/db";
+import { ImportSheet } from "../ui/ImportSheet";
 import { Icon } from "../ui/Icon";
 import { Ruler } from "../ui/Ruler";
 import { fmt, money } from "../ui/format";
@@ -17,6 +18,8 @@ interface Props {
 export function SettingsScreen({ status, statusError, onRefresh, onLogout }: Props) {
   const [persisted, setPersisted] = useState<boolean | null>(null);
   const [usage, setUsage] = useState<{ used: number; quota: number } | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const standalone = (navigator as { standalone?: boolean }).standalone === true || (typeof matchMedia === "function" && matchMedia("(display-mode: standalone)").matches);
 
   const readStorage = async () => {
     try {
@@ -90,9 +93,17 @@ export function SettingsScreen({ status, statusError, onRefresh, onLogout }: Pro
       <h2 className="sec">Дані</h2>
       <section className="card pad">
         <p className="note first">
-          Усе зберігається в IndexedDB на цьому пристрої.{" "}
+          Усе зберігається в IndexedDB цього браузера на цьому пристрої.{" "}
           {persisted === true && "Сховище захищене від автоочищення."}
           {persisted === false && "Сховище може бути очищене браузером, якщо бракуватиме місця."}
+        </p>
+        <p className="note">
+          Зараз: {standalone ? "встановлений застосунок" : "вкладка браузера"} · {location.host}
+        </p>
+        <p className="note">
+          На iPhone вкладка Safari й іконка на початковому екрані мають окремі сховища: дані з одного не видно в іншому. Так само для кожної адреси
+          (у кожного деплою Vercel вона може бути своя). Користуйтеся одним способом входу або переносіть дані через експорт та імпорт.
+          {!standalone && " У вкладці Safari сайт може втратити дані після кількох днів без відвідувань, тому краще встановити застосунок."}
         </p>
         {usage && (
           <p className="note tnum">
@@ -108,6 +119,10 @@ export function SettingsScreen({ status, statusError, onRefresh, onLogout }: Pro
           <button className="btn" onClick={doExport}>
             <Icon name="down" size={18} />
             Експортувати базу
+          </button>
+          <button className="btn" onClick={() => setImportOpen(true)}>
+            <Icon name="plus" size={18} />
+            Імпортувати
           </button>
         </div>
       </section>
@@ -130,6 +145,7 @@ export function SettingsScreen({ status, statusError, onRefresh, onLogout }: Pro
           Вийти
         </button>
       </section>
+      <ImportSheet open={importOpen} onClose={() => setImportOpen(false)} />
     </>
   );
 }
