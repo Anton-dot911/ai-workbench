@@ -235,3 +235,7 @@ textarea.field { resize: vertical; line-height: 1.4; }
 
 .versions { margin: 4px 14px 0; }
 .vrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; border-top: 1px solid var(--line); font-size: 14.5px; }
+
+/* ---- імпорт ---- */
+.filebtn { position: relative; width: 100%; justify-content: center; overflow: hidden; }
+.filebtn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; font-size: 0; }
