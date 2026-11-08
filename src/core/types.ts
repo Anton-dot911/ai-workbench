@@ -23,6 +23,10 @@ export interface AgentManifest {
   id: string;
   name: string;
   subtitle: string;
+  /** Ім'я іконки з ui/Icon. */
+  icon: string;
+  /** Slash-команди, що вибирають цього агента: `/док`, `/пост`. */
+  commands: string[];
   description: string;
   model: ModelTier;
   systemPrompt: string;
@@ -118,6 +122,9 @@ export interface Run {
   usage: { input: number; output: number; cacheRead: number; costUsd: number };
   chainId?: string;
   createdAt: number;
+  /** Кількість викликів моделі в циклі tool use. */
+  steps?: number;
+  toolCalls?: { name: string; ok: boolean }[];
 }
 
 export type { Usage };
