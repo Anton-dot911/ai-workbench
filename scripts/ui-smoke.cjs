@@ -23,15 +23,36 @@ w.localStorage.setItem("wb.token", "t");
 const posts = [];
 const PRICES = { "claude-sonnet-5-5": { in: 2, out: 10, cacheRead: 0.1, cacheWrite: 2.5 } };
 const sse = (evs) => evs.map((e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join("");
+let nextTool = null;
+const textTurn = () => sse([
+  { type: "message_start", message: { usage: { input_tokens: 500, output_tokens: 1 } } },
+  { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+  { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Готовий текст відповіді" } },
+  { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 20 } },
+]);
+const toolTurn = (t) => {
+  const json = JSON.stringify(t.input);
+  return sse([
+    { type: "message_start", message: { usage: { input_tokens: 300, output_tokens: 1 } } },
+    { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+    { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Виправляю." } },
+    { type: "content_block_stop", index: 0 },
+    { type: "content_block_start", index: 1, content_block: { type: "tool_use", id: "toolu_ui", name: t.name, input: {} } },
+    { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: json.slice(0, 12) } },
+    { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: json.slice(12) } },
+    { type: "content_block_stop", index: 1 },
+    { type: "message_delta", delta: { stop_reason: "tool_use" }, usage: { output_tokens: 40 } },
+  ]);
+};
 w.fetch = async (url, init = {}) => {
   if (init.method === "POST") {
-    posts.push(JSON.parse(init.body));
-    return new Response(sse([
-      { type: "message_start", message: { usage: { input_tokens: 500, output_tokens: 1 } } },
-      { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
-      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Готовий текст відповіді" } },
-      { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 20 } },
-    ]), { status: 200, headers: { "content-type": "text/event-stream" } });
+    const body = JSON.parse(init.body);
+    posts.push(body);
+    const last = body.messages.at(-1);
+    const isResult = Array.isArray(last.content) && last.content[0]?.type === "tool_result";
+    let payload = textTurn();
+    if (nextTool && !isResult) { payload = toolTurn(nextTool); nextTool = null; }
+    return new Response(payload, { status: 200, headers: { "content-type": "text/event-stream" } });
   }
   return new Response(JSON.stringify({ ok: true, spent: { dayUsd: 0.5, monthUsd: 2 }, limits: { dayUsd: 3, monthUsd: 30 }, prices: PRICES, tz: "Europe/Kyiv" }), { status: 200, headers: { "content-type": "application/json" } });
 };
@@ -119,6 +140,38 @@ const check = (name, cond, extra = "") => { console.log((cond ? "PASS" : "FAIL")
   byText(".item .btn", "В контекст").click(); await sleep(450);
   await tab("Контекст");
   check("артефакт доданий вручну в контекст", qa(".src .dt").some((e) => e.textContent.includes("додано вручну")));
+
+  // Агенти, команди, правки з diff (етап 3a)
+  await tab("Робота");
+  const taskInput = () => q(".inrow input[type=text]");
+  q(".agentbtn").click(); await sleep(80);
+  check("шторка агентів: список і команди", !!q(".sheet.on .agent") && /Документи/.test(q(".sheet.on").textContent) && /\/док/.test(q(".sheet.on").textContent));
+  qa(".scrim.on")[0].click(); await sleep(80);
+  check("шторка закривається по тапу на фон", !q(".sheet.on"));
+
+  const before3 = posts.length;
+  setVal(taskInput(), "/xyz тест"); await sleep(30); q(".go").click(); await sleep(80);
+  check("невідома команда: підказка, запиту немає", /Невідома команда/.test(q(".toast").textContent) && posts.length === before3, q(".toast").textContent);
+  setVal(taskInput(), "/док"); await sleep(30); q(".go").click(); await sleep(80);
+  check("команда без тексту перемикає агента", /Агент: Документи/.test(q(".toast").textContent) && posts.length === before3);
+
+  q(".clipbtn").click(); await sleep(50);
+  setVal(q("textarea.frag"), "У рамках проєкту. Даний документ описує план.");
+  nextTool = { name: "apply_edits", input: { target: "selection", edits: [
+    { find: "У рамках", replace: "У межах", reason: "калька" },
+    { find: "Даний документ", replace: "Документ", reason: "канцелярит" },
+  ] } };
+  setVal(taskInput(), "виправ калькі"); await sleep(60); q(".go").click(); await sleep(900);
+  check("diff-шторка: заголовок і дві правки", /Підтвердьте зміни/.test(q(".sheet.on")?.textContent ?? "") && qa(".sheet.on .edit").length === 2);
+  check("diff показує що замінюється й на що", !!q(".sheet.on .edit del") && !!q(".sheet.on .edit ins"));
+  qa(".sheet.on .edit input")[1].click(); await sleep(50);
+  const applyBtn = byText(".sheet.on button", "Застосувати (1)");
+  check("лічильник правок оновився після зняття галочки", !!applyBtn);
+  applyBtn.click(); await sleep(1000);
+  check("прийнято лише першу правку", q("textarea.frag").value === "У межах проєкту. Даний документ описує план.", q("textarea.frag").value);
+  check("запит із tool_result пішов у модель", posts.at(-1).messages.at(-1).content[0].type === "tool_result" && /Застосовано правок: 1 з 2/.test(posts.at(-1).messages.at(-1).content[0].content));
+  check("у картці є мітка інструмента й підсумок", qa(".tool.ok").some((e) => e.textContent.includes("правки")) && !!byText(".ptext", "Виправляю."));
+  check("шторка закрилась, запуск завершено", !q(".sheet.on") && !q(".go.stop"));
 
   // Налаштування
   await tab("Параметри");
