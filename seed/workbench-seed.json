@@ -1,1 +1,70 @@
-
+{
+ "app": "ai-workbench",
+ "profile": {
+  "language": "uk",
+  "tone": "діловий, стислий, прямий, без води, технічно точний",
+  "audience": "розробники й техліди; клієнти малого бізнесу (для них без жаргону, терміни пояснювати)",
+  "expertise": [
+   "applied AI",
+   "продуктова інженерія",
+   "Claude API",
+   "TypeScript",
+   "Next.js",
+   "PWA",
+   "Supabase",
+   "Vercel",
+   "Web3 (Base)",
+   "ЧПК-фрезерування"
+  ],
+  "codingPrefs": {
+   "stack": [
+    "TypeScript",
+    "React",
+    "Next.js",
+    "Vite",
+    "Vercel",
+    "Supabase",
+    "Claude API"
+   ],
+   "style": "мінімально достатнє рішення, суворий TypeScript, малі функції, без зайвих абстракцій і коментарів «що робить код»; готовність підтверджується тестами й виводом команд"
+  }
+ },
+ "memory": [
+  {
+   "text": "Я solo Applied AI / Product Engineer, будую персональні AI-продукти на Claude API.",
+   "tags": [
+    "роль"
+   ],
+   "pinned": true
+  },
+  {
+   "text": "Основний стек: TypeScript, React і Next.js, Vercel, Supabase, GitHub; AI через Claude API.",
+   "tags": [
+    "стек"
+   ],
+   "pinned": true
+  },
+  {
+   "text": "Починаю з мінімального рішення й розширюю поступово; готовність підтверджую виводом команд, а не словами.",
+   "tags": [
+    "підхід"
+   ],
+   "pinned": true
+  },
+  {
+   "text": "Працюю лише з iPhone, тому текст і код мають читатися на вузькому екрані.",
+   "tags": [
+    "пристрій"
+   ],
+   "pinned": true
+  },
+  {
+   "text": "Паралельно працюю оператором ЧПК-фрезерного верстата (Haas VF, алюміній і бронза).",
+   "tags": [
+    "виробництво",
+    "чпк"
+   ],
+   "pinned": false
+  }
+ ]
+}
