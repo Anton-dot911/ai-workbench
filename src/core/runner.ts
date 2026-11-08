@@ -48,6 +48,8 @@ export function buildRequest(agent: AgentManifest, ctx: ContextPacket, task: Tas
     ...(agent.temperature !== undefined ? { temperature: agent.temperature } : {}),
     system,
     ...(agent.tools.length ? { tools: agent.tools } : {}),
+    // Агент зі структурованим виходом зобов'язаний викликати завершальний інструмент.
+    ...(agent.finalTool ? { tool_choice: { type: "tool", name: agent.finalTool, disable_parallel_tool_use: true } } : {}),
     messages: [{ role: "user", content }],
   };
 }
@@ -81,7 +83,8 @@ export async function runAgent(agent: AgentManifest, task: Task, ui: RunUi): Pro
   const { packet: ctx } = await resolveContext(agent, task);
   const req = buildRequest(agent, ctx, task);
   const messages = [...req.messages];
-  const toolCtx: ToolContext = { signal: ui.signal, ui: { confirm: ui.confirm, ask: ui.ask } };
+  const toolCtx: ToolContext = { signal: ui.signal, calls: {}, ui: { confirm: ui.confirm, ask: ui.ask } };
+  let finalOutput: string | null = null;
 
   const total = { input: 0, output: 0, cacheRead: 0, costUsd: 0 };
   const toolCalls: { name: string; ok: boolean }[] = [];
@@ -120,18 +123,26 @@ export async function runAgent(agent: AgentManifest, task: Task, ui: RunUi): Pro
     messages.push({ role: "assistant", content: res.content.filter((b) => b.type !== "text" || (b.text ?? "").length > 0) });
     const results: unknown[] = [];
     for (const call of calls) {
-      ui.onTool?.({ name: call.name ?? "?", status: "start" });
+      const name = call.name ?? "?";
+      toolCtx.calls![name] = (toolCtx.calls![name] ?? 0) + 1;
+      ui.onTool?.({ name, status: "start" });
       const out = await execTool(call, toolCtx);
+      if (!out.isError && TOOL_HANDLERS[name]?.terminal) finalOutput = out.content;
       toolCalls.push({ name: call.name ?? "?", ok: !out.isError });
       ui.onTool?.({ name: call.name ?? "?", status: out.isError ? "error" : "ok" });
       results.push({ type: "tool_result", tool_use_id: call.id, content: out.content, ...(out.isError ? { is_error: true } : {}) });
     }
     messages.push({ role: "user", content: results });
 
+    // Завершальний інструмент виконано успішно: його результат і є відповідь агента.
+    if (finalOutput !== null) {
+      stopReason = "end_turn";
+      break;
+    }
     if (steps >= MAX_STEPS) throw new Error(`Агент перевищив ліміт кроків (${MAX_STEPS}). Спробуйте уточнити задачу.`);
   }
 
-  const output = text.trim();
+  const output = finalOutput !== null ? finalOutput : text.trim();
   const run: Run = {
     id: crypto.randomUUID(),
     agentId: agent.id,

@@ -33,6 +33,8 @@ export interface AgentManifest {
   contextNeeds: ContextNeed[];
   tools: ToolDef[];
   serverTools?: string[];
+  /** Завершальний інструмент: модель зобов'язана його викликати (tool_choice), і після успішного виклику запуск завершується. Його вхід і є результат агента. */
+  finalTool?: string;
   output: { kind: "text" | "markdown" | "code" | "json" | "document"; schema?: JSONSchema; saveAs?: ArtifactType };
   maxTokens: number;
   temperature?: number;
