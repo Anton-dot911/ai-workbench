@@ -173,6 +173,21 @@ const check = (name, cond, extra = "") => { console.log((cond ? "PASS" : "FAIL")
   check("у картці є мітка інструмента й підсумок", qa(".tool.ok").some((e) => e.textContent.includes("правки")) && !!byText(".ptext", "Виправляю."));
   check("шторка закрилась, запуск завершено", !q(".sheet.on") && !q(".go.stop"));
 
+  // Імпорт бази: Пам'ять → імпорт пакета
+  await tab("Параметри");
+  check("параметри показують режим і адресу", /вкладка браузера · app\.test/.test(q("section[aria-label=Налаштування]").textContent), q("section[aria-label=Налаштування]").textContent.match(/Зараз:[^\n]*/)?.[0]);
+  [...q("section[aria-label=Налаштування]").querySelectorAll("button")].find((b) => b.textContent.includes("Імпортувати")).click(); await sleep(80);
+  check("шторка імпорту відкрита", /Імпорт бази/.test(q(".sheet.on")?.textContent ?? ""));
+  setVal(q(".sheet.on textarea"), "не json"); await sleep(50);
+  check("некоректний текст дає помилку й блокує імпорт", !!q(".sheet.on .warn") && byText(".sheet.on button", "Імпортувати").disabled);
+  setVal(q(".sheet.on textarea"), JSON.stringify({ profile: { tone: "діловий, прямий" }, memory: [{ text: "Імпортований факт про стек", pinned: true }, { text: "Другий факт" }] })); await sleep(50);
+  check("попередній перегляд показує кількість", /профіль, фактів: 2/.test(q(".sheet.on .note.tnum")?.textContent ?? ""), q(".sheet.on .note.tnum")?.textContent);
+  byText(".sheet.on button", "Імпортувати").click(); await sleep(400);
+  check("імпорт завершено, шторка закрита", !q(".sheet.on") && /Імпортовано: профіль, фактів 2/.test(q(".toast").textContent), q(".toast").textContent);
+  await tab("Пам'ять");
+  check("імпортовані факти видно в «Пам'яті»", !!byText(".fact .ftext", "Імпортований факт") && !!byText(".fact .ftext", "Другий факт"));
+  check("профіль оновлено з імпорту", q("textarea[placeholder='діловий, без канцеляризмів']").value === "діловий, прямий");
+
   // Налаштування
   await tab("Параметри");
   check("витрати з проксі на екрані параметрів", /\$0,50 з \$3,00/.test(q("#s-settings, section[aria-label=Налаштування]").textContent));
