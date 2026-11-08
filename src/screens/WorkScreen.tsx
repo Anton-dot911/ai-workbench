@@ -1,16 +1,20 @@
 import { useEffect, useRef, useState } from "react";
+import { parsePosts, parseReview, reviewToEdits, summarizeOutput, type ReviewIssue } from "../agents/outputs";
 import { AGENTS, getAgent, parseCommand } from "../agents/registry";
 import { ApiError } from "../core/claude";
 import type { Resolved } from "../core/contextBuilder";
 import { estimateRun } from "../core/estimate";
 import { runAgent, type ToolEvent } from "../core/runner";
 import { getSession, sessionTask, setSession, useSession } from "../core/session";
-import { addMemory, db, saveRunAsArtifact } from "../db/db";
+import { addMemory, db, saveRunAsArtifact, saveTextArtifact } from "../db/db";
+import { TOOL_HANDLERS } from "../tools/handlers";
 import type { AskRequest, ConfirmDecision, ConfirmRequest } from "../tools/types";
 import { AskSheet } from "../ui/AskSheet";
 import { ConfirmSheet } from "../ui/ConfirmSheet";
 import { FactForm } from "../ui/FactForm";
 import { Icon } from "../ui/Icon";
+import { PostCard } from "../ui/PostCard";
+import { ReviewCard } from "../ui/ReviewCard";
 import { Sheet } from "../ui/Sheet";
 import { approx, fmt, money, plural, tk } from "../ui/format";
 import { toast } from "../ui/toast";
@@ -25,7 +29,9 @@ const TOOL_LABEL: Record<string, string> = {
 
 interface FeedItem {
   id: string;
+  agentId: string;
   agentName: string;
+  savedVariants?: number[];
   task: string;
   selection?: string;
   output: string;
@@ -111,7 +117,7 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
 
     const task = sessionTask({ ...s, task: text });
     const id = crypto.randomUUID();
-    setFeed((f) => [...f, { id, agentName: ag.name, task: text, selection: task.selection, output: "", status: "running", tools: [] }]);
+    setFeed((f) => [...f, { id, agentId: ag.id, agentName: ag.name, task: text, selection: task.selection, output: "", status: "running", tools: [] }]);
     setSession({ task: "" });
     setBusy(true);
     const ac = new AbortController();
@@ -130,13 +136,15 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
       });
       patch(id, () => ({
         status: "done",
+        // Агент зі структурованим виходом: показуємо результат завершального інструмента, а не вступний текст.
+        ...(ag.finalTool ? { output: out } : {}),
         runId: run.id,
         usage: run.usage,
         steps: run.steps,
         sources: run.contextSnapshot.sources.length,
         truncated: stopReason === "max_tokens",
       }));
-      setSession((st) => ({ turns: [...st.turns, { task: text, output: out }].slice(-8) }));
+      setSession((st) => ({ turns: [...st.turns, { task: text, output: summarizeOutput(ag.id, out) }].slice(-8) }));
     } catch (e) {
       if (e instanceof ApiError && e.kind === "aborted") {
         patch(id, () => ({ status: "stopped" }));
@@ -161,6 +169,36 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
     patch(item.id, () => ({ saved: true }));
     toast("Збережено в бібліотеці");
   }
+
+  /** Передає текст в агента «Перевірка»: готує фрагмент і задачу, запуск за користувачем. */
+  function startReview(text: string, originTask: string, modes = "language, logic, style") {
+    setSession({ agentId: "review", frag: text, task: `${modes}. Завдання, на яке відповідав текст: «${originTask}»` });
+    setFragOpen(true);
+    toast("Текст передано в «Перевірку». Натисніть «Запустити»");
+  }
+
+  /** Зауваження з готовою заміною → правки з diff і підтвердженням (той самий інструмент apply_edits). */
+  async function applyFixes(issues: ReviewIssue[]) {
+    const input = { target: "selection", edits: reviewToEdits(issues) };
+    const handler = TOOL_HANDLERS.apply_edits;
+    const ctx = { calls: {}, ui: { confirm: (req: ConfirmRequest) => new Promise<ConfirmDecision>((resolve) => setPending({ kind: "confirm", req, resolve })) } };
+    try {
+      const plan = await handler.plan!(input, ctx);
+      if (plan.error) return void toast(plan.error);
+      const decision = await ctx.ui.confirm(plan.confirm!);
+      if (!decision.approve) return;
+      const out = await handler.run(input, ctx, decision);
+      toast(out.content);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Не вдалося застосувати");
+    }
+  }
+
+  const postText = (item: FeedItem, k: number): string => {
+    const p = parsePosts(item.output);
+    const v = p?.variants[k];
+    return v ? v.text + (v.hashtags.length ? "\n\n" + v.hashtags.join(" ") : "") : "";
+  };
 
   async function copy(text: string) {
     try {
@@ -220,6 +258,26 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
                   <i />
                   <i />
                 </div>
+              ) : it.status === "done" && it.agentId === "review" && parseReview(it.output) ? (
+                <ReviewCard data={parseReview(it.output)!} onApply={applyFixes} />
+              ) : it.status === "done" && it.agentId === "posts" && parsePosts(it.output) ? (
+                <PostCard
+                  data={parsePosts(it.output)!}
+                  saved={it.savedVariants ?? []}
+                  onSave={async (k) => {
+                    await saveTextArtifact(postText(it, k), "post", { parentRunId: it.runId, fallbackTitle: it.task });
+                    patch(it.id, (i) => ({ savedVariants: [...(i.savedVariants ?? []), k] }));
+                    toast("Збережено в бібліотеці як пост");
+                  }}
+                  onReview={(k) => startReview(postText(it, k), it.task, "language, facts, style")}
+                  onCopy={(k) => copy(postText(it, k))}
+                  onReuse={(k) => {
+                    setSession({ frag: postText(it, k) });
+                    setFragOpen(true);
+                    toast("Варіант став фрагментом для наступної задачі");
+                  }}
+                  onAgain={() => setSession((st) => ({ task: it.task, agentId: it.agentId, runNonce: st.runNonce + 1 }))}
+                />
               ) : (
                 <div className="ptext">{it.output}</div>
               )}
@@ -239,7 +297,7 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
                   {it.steps && it.steps > 1 ? ` · кроків ${it.steps}` : ""}
                 </p>
               )}
-              {it.status === "done" && (
+              {it.status === "done" && it.agentId !== "review" && it.agentId !== "posts" && (
                 <div className="acts">
                   <button className="btn" disabled={it.saved} onClick={() => save(it)}>
                     <Icon name={it.saved ? "check" : "save"} size={18} />
@@ -248,6 +306,10 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
                   <button className="btn" onClick={() => setRemember(it)}>
                     <Icon name="remember" size={18} />
                     Запам'ятати
+                  </button>
+                  <button className="btn" onClick={() => startReview(it.output, it.task)}>
+                    <Icon name="review" size={18} />
+                    Перевірити
                   </button>
                   <button className="btn sq" aria-label="Копіювати" onClick={() => copy(it.output)}>
                     <Icon name="copy" size={18} />
