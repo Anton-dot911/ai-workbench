@@ -43,22 +43,25 @@ for (const table of [db.memory, db.artifacts, db.profile] as Table<any, any>[]) 
 const firstLine = (s: string): string =>
   (s.split("\n").find((l) => l.trim()) ?? "").replace(/^#+\s*/, "").trim();
 
-export async function saveRunAsArtifact(run: Run, type: Artifact["type"] = "document"): Promise<Artifact> {
-  const content = run.output;
+/** Зберігає текст як новий артефакт (версія 1). Заголовок береться з першого рядка. */
+export async function saveTextArtifact(content: string, type: Artifact["type"], opts: { parentRunId?: string; fallbackTitle?: string } = {}): Promise<Artifact> {
   const now = Date.now();
   const artifact: Artifact = {
     id: crypto.randomUUID(),
     type,
-    title: (firstLine(content) || run.input).slice(0, 80),
+    title: (firstLine(content) || opts.fallbackTitle || "Без назви").slice(0, 80),
     content,
     summary: content.replace(/\s+/g, " ").trim().slice(0, 200),
-    parentRunId: run.id,
+    parentRunId: opts.parentRunId,
     versions: [{ at: now, content }],
     updatedAt: now,
   };
   await db.artifacts.add(artifact);
   return artifact;
 }
+
+export const saveRunAsArtifact = (run: Run, type: Artifact["type"] = "document"): Promise<Artifact> =>
+  saveTextArtifact(run.output, type, { parentRunId: run.id, fallbackTitle: run.input });
 
 // ----- Профіль -----
 
