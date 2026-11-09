@@ -7,6 +7,8 @@ class WorkbenchDB extends Dexie {
   memory!: Table<MemoryItem, string>;
   artifacts!: Table<Artifact, string>;
   runs!: Table<Run, string>;
+  /** Службові записи (маркер першого запуску, самоперевірка). */
+  meta!: Table<{ key: string; value: unknown }, string>;
 
   constructor() {
     super("workbench");
@@ -16,6 +18,8 @@ class WorkbenchDB extends Dexie {
       artifacts: "id, type, workspaceId, updatedAt",
       runs: "id, agentId, chainId, createdAt",
     });
+    // Додаткова таблиця; наявні дані не змінюються.
+    this.version(2).stores({ meta: "key" });
   }
 }
 
@@ -83,6 +87,7 @@ export async function getProfile(): Promise<Profile> {
 
 export async function saveProfile(p: Profile): Promise<void> {
   await db.profile.put({ ...p, id: "me" });
+  if (!(await db.profile.get("me"))) throw new Error("Браузер не зберіг профіль у локальній базі. Зробіть експорт і перезапустіть застосунок.");
 }
 
 // ----- Пам'ять -----
@@ -109,6 +114,7 @@ export async function addMemory(f: FactInput): Promise<MemoryItem> {
     pinned: f.pinned ? 1 : 0,
   };
   await db.memory.add(item);
+  if (!(await db.memory.get(item.id))) throw new Error("Браузер не зберіг запис у локальній базі. Зробіть експорт і перезапустіть застосунок.");
   return item;
 }
 
