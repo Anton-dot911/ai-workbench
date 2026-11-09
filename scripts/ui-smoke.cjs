@@ -44,7 +44,19 @@ const toolTurn = (t) => {
     { type: "message_delta", delta: { stop_reason: "tool_use" }, usage: { output_tokens: 40 } },
   ]);
 };
+const backups = { latest: null };
 w.fetch = async (url, init = {}) => {
+  if (String(url).startsWith("/api/backup")) {
+    const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json" } });
+    if (init.method === "POST") {
+      const b = JSON.parse(init.body);
+      backups.latest = { savedAt: Date.now(), counts: { profile: !!b.profile?.[0]?.tone, memory: b.memory.length, artifacts: b.artifacts.length }, data: b };
+      return json({ ok: true, savedAt: backups.latest.savedAt, counts: backups.latest.counts });
+    }
+    if (!backups.latest) return json({ error: { type: "not_found", message: "Копії ще немає." } }, 404);
+    const { savedAt, counts, data } = backups.latest;
+    return json(String(url).includes("meta") ? { ok: true, savedAt, counts } : { ok: true, savedAt, counts, data });
+  }
   if (init.method === "POST") {
     const body = JSON.parse(init.body);
     posts.push(body);
@@ -227,6 +239,25 @@ const check = (name, cond, extra = "") => { console.log((cond ? "PASS" : "FAIL")
   await tab("Пам'ять");
   check("імпортовані факти видно в «Пам'яті»", !!byText(".fact .ftext", "Імпортований факт") && !!byText(".fact .ftext", "Другий факт"));
   check("профіль оновлено з імпорту", q("textarea[placeholder='діловий, без канцеляризмів']").value === "діловий, прямий");
+
+  // Копія й діагностика сховища
+  await tab("Параметри");
+  const settings = () => q("section[aria-label=Налаштування]");
+  const sbtn = (t) => [...settings().querySelectorAll("button")].find((b) => b.textContent.includes(t));
+  await sleep(200);
+  check("«Стан сховища»: дата створення й лічильники", /Сховище створено:/.test(settings().textContent) && /У базі: профіль .*фактів \d+/.test(settings().textContent));
+  check("копії ще немає", /Копії ще немає/.test(settings().textContent));
+  sbtn("Перевірити запис у сховище").click(); await sleep(300);
+  check("самоперевірка запису проходить", /Запис і читання працюють/.test(settings().textContent));
+  sbtn("Зберегти копію зараз").click(); await sleep(500);
+  check("копію збережено й показано в параметрах", /Копію збережено/.test(q(".toast").textContent) && /Остання копія:.*фактів \d+/.test(settings().textContent), q(".toast").textContent);
+  check("у хмарну копію пішли профіль і факти, а не журнал запусків", backups.latest.counts.memory >= 2 && !("runs" in backups.latest.data));
+  backups.latest.data.memory.push({ text: "Факт лише з хмарної копії", tags: [], source: "user" });
+  sbtn("Відновити з копії").click(); await sleep(500);
+  check("відновлення додає лише відсутнє", /Відновлено:.*фактів 1/.test(q(".toast").textContent), q(".toast").textContent);
+  await tab("Пам'ять");
+  check("відновлений факт видно в «Пам'яті»", !!byText(".fact .ftext", "Факт лише з хмарної копії"));
+  check("банера відновлення немає, коли локальні дані є", !q(".offer"));
 
   // Налаштування
   await tab("Параметри");
