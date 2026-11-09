@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import type { BackupMeta } from "../db/backup";
 import { addMemory, db, getProfile, parseTags, saveProfile, updateMemory } from "../db/db";
+import type { StorageHealth } from "../db/health";
 import { useLive } from "../db/useLive";
 import type { MemoryItem, Profile } from "../core/types";
 import { FactForm } from "../ui/FactForm";
@@ -43,8 +45,13 @@ function ProfileCard({ initial, live }: { initial: Profile; live: Profile | null
     const c = canon(next);
     if (c === saved.current) return;
     saved.current = c;
-    await saveProfile(next);
-    toast("Профіль збережено");
+    try {
+      await saveProfile(next);
+      toast("Профіль збережено");
+    } catch (e) {
+      saved.current = "";
+      toast(e instanceof Error ? e.message : "Не вдалося зберегти профіль");
+    }
   }
   const lists = (): Profile => ({
     ...p,
@@ -97,7 +104,14 @@ function ProfileCard({ initial, live }: { initial: Profile; live: Profile | null
   );
 }
 
-export function MemoryScreen() {
+interface MemoryProps {
+  offer: BackupMeta | null;
+  health: StorageHealth | null;
+  onRestore: () => void;
+  onDismissOffer: () => void;
+}
+
+export function MemoryScreen({ offer, health, onRestore, onDismissOffer }: MemoryProps) {
   const profile = useLive(() => getProfile(), null as Profile | null);
   const facts = useLive(() => db.memory.toArray(), [] as MemoryItem[]);
   const [q, setQ] = useState("");
@@ -117,6 +131,24 @@ export function MemoryScreen() {
 
   return (
     <>
+      {offer && (
+        <section className="card pad offer">
+          <strong className="offt">Знайдено хмарну копію</strong>
+          <p className="note">
+            Від {when(offer.savedAt)}: фактів {offer.counts.memory}, артефактів {offer.counts.artifacts}
+            {offer.counts.profile ? ", профіль" : ""}. Локальна база зараз порожня.
+            {health?.idbWiped ? " Схоже, її очистила система." : ""}
+          </p>
+          <div className="acts nopad">
+            <button className="btn primary" onClick={onRestore}>
+              Відновити
+            </button>
+            <button className="btn" onClick={onDismissOffer}>
+              Не зараз
+            </button>
+          </div>
+        </section>
+      )}
       <h2 className="sec first">Профіль</h2>
       {seed ? <ProfileCard initial={seed} live={profile} /> : <p className="note">Завантаження…</p>}
       <p className="note">Профіль іде в кешований префікс кожного запиту. Замок «приховано» виключає поле з запитів.</p>
@@ -189,10 +221,14 @@ export function MemoryScreen() {
           submitLabel="Зберегти"
           onCancel={() => setEditing(null)}
           onSubmit={async (v) => {
-            if (editing === "new") await addMemory({ ...v, source: "user" });
-            else if (editing) await updateMemory(editing.id, { text: v.text, tags: v.tags, pinned: v.pinned ? 1 : 0 });
-            setEditing(null);
-            toast("Факт збережено");
+            try {
+              if (editing === "new") await addMemory({ ...v, source: "user" });
+              else if (editing) await updateMemory(editing.id, { text: v.text, tags: v.tags, pinned: v.pinned ? 1 : 0 });
+              setEditing(null);
+              toast("Факт збережено");
+            } catch (e) {
+              toast(e instanceof Error ? e.message : "Не вдалося зберегти факт");
+            }
           }}
         />
       </Sheet>
