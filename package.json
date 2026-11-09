@@ -15,7 +15,7 @@
     "build": "tsc --noEmit && vite build",
     "check": "npm run typecheck && npm run test && vite build && npm run smoke",
     "preview": "vite preview",
-    "smoke": "node scripts/ui-smoke.cjs"
+    "smoke": "node scripts/ui-smoke.cjs && node scripts/ui-smoke-restore.cjs"
   },
   "dependencies": {
     "@upstash/redis": "^1.34.0",
