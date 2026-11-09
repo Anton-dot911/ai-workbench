@@ -268,3 +268,7 @@ textarea.field { resize: vertical; line-height: 1.4; }
 .pstatus { padding: 4px 14px 2px; }
 .ok { margin: 4px 0; color: var(--ok); font-size: 15px; }
 .pstatus .warn { margin: 6px 0; }
+
+/* ---- копія й діагностика ---- */
+.offer { border-color: var(--signal); box-shadow: inset 4px 0 0 var(--signal); }
+.offt { font: 600 20px/1.1 var(--label); }

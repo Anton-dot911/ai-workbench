@@ -5,7 +5,9 @@ import { resolveContext, type Resolved } from "./core/contextBuilder";
 import { setPrices } from "./core/prices";
 import { sessionTask, setSession, useSession } from "./core/session";
 import { clearToken, getToken } from "./core/settings";
+import { backupMeta, isAutoBackup, pushBackup, restoreBackup, type BackupMeta } from "./db/backup";
 import { useDataVersion } from "./db/changes";
+import { checkHealth, dataCounts, isLocalEmpty, type StorageHealth } from "./db/health";
 import { ContextScreen } from "./screens/ContextScreen";
 import { Gate } from "./screens/Gate";
 import { LibraryScreen } from "./screens/LibraryScreen";
@@ -42,6 +44,9 @@ export default function App() {
   const [statusError, setStatusError] = useState("");
   const [resolved, setResolved] = useState<Resolved | null>(null);
   const [agentOpen, setAgentOpen] = useState(false);
+  const [health, setHealth] = useState<StorageHealth | null>(null);
+  const [offer, setOffer] = useState<BackupMeta | null>(null);
+  const [offerDismissed, setOfferDismissed] = useState(false);
   const session = useSession();
   const agent = getAgent(session.agentId);
   const dataVersion = useDataVersion();
@@ -73,6 +78,49 @@ export default function App() {
   useEffect(() => {
     if (token) void navigator.storage?.persist?.();
   }, [token]);
+
+  // Діагностика сховища: чи було воно очищене системою.
+  useEffect(() => {
+    if (token) checkHealth().then(setHealth).catch((e) => console.error(e));
+  }, [token]);
+
+  // Якщо локальна база порожня, а хмарна копія є, пропонуємо відновити.
+  useEffect(() => {
+    if (!token) return;
+    let dead = false;
+    (async () => {
+      try {
+        if (!isLocalEmpty(await dataCounts())) return void (!dead && setOffer(null));
+        const m = await backupMeta(token);
+        if (!dead) setOffer(m);
+      } catch {
+        /* без мережі чи без Redis: не заважаємо */
+      }
+    })();
+    return () => {
+      dead = true;
+    };
+  }, [token, dataVersion]);
+  useEffect(() => {
+    if (offer && !offerDismissed) toast("Локальна база порожня, але є хмарна копія. Відкрийте «Пам'ять».");
+  }, [offer, offerDismissed]);
+
+  // Автокопія (якщо ввімкнена): через кілька секунд після змін. Порожній стан не відправляється.
+  useEffect(() => {
+    if (!token || !isAutoBackup()) return;
+    const t = setTimeout(() => void pushBackup(token).catch(() => {}), 8000);
+    return () => clearTimeout(t);
+  }, [token, dataVersion]);
+
+  async function restoreFromOffer() {
+    try {
+      const s = await restoreBackup(token);
+      toast(`Відновлено: фактів ${s.memory}, артефактів ${s.artifacts}${s.profile ? ", профіль" : ""}`);
+      setOffer(null);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Не вдалося відновити");
+    }
+  }
 
   // Попередній перегляд контексту: перераховується, коли змінюються задача, фрагмент, перемикачі чи дані.
   useEffect(() => {
@@ -133,10 +181,10 @@ export default function App() {
           <LibraryScreen />
         </section>
         <section className={screen("memory")} aria-label="Пам'ять">
-          <MemoryScreen />
+          <MemoryScreen offer={offerDismissed ? null : offer} health={health} onRestore={restoreFromOffer} onDismissOffer={() => setOfferDismissed(true)} />
         </section>
         <section className={screen("settings")} aria-label="Налаштування">
-          <SettingsScreen status={status} statusError={statusError} onRefresh={refresh} onLogout={logout} />
+          <SettingsScreen token={token} health={health} status={status} statusError={statusError} onRefresh={refresh} onLogout={logout} />
         </section>
       </main>
 
