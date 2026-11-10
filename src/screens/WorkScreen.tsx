@@ -15,6 +15,7 @@ import { FactForm } from "../ui/FactForm";
 import { Icon } from "../ui/Icon";
 import { PostCard } from "../ui/PostCard";
 import { ReviewCard } from "../ui/ReviewCard";
+import { SourceList } from "../ui/SourceList";
 import { Sheet } from "../ui/Sheet";
 import { approx, fmt, money, plural, tk } from "../ui/format";
 import { toast } from "../ui/toast";
@@ -25,6 +26,8 @@ const TOOL_LABEL: Record<string, string> = {
   read_artifact: "читання документа",
   save_artifact: "збереження",
   ask_user: "питання",
+  web_search: "веб-пошук",
+  propose_memory: "пропозиція пам'яті",
 };
 
 interface FeedItem {
@@ -38,8 +41,9 @@ interface FeedItem {
   status: "running" | "done" | "stopped" | "error";
   error?: string;
   truncated?: boolean;
-  tools: { name: string; status: ToolEvent["status"] }[];
-  usage?: { input: number; output: number; cacheRead: number; costUsd: number };
+  tools: { name: string; status: ToolEvent["status"]; detail?: string }[];
+  links?: { url: string; title: string }[];
+  usage?: { input: number; output: number; cacheRead: number; costUsd: number; searches?: number };
   steps?: number;
   sources?: number;
   runId?: string;
@@ -129,7 +133,10 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
         onText: (d) => patch(id, (i) => ({ output: i.output + d })),
         onTool: (e) =>
           patch(id, (i) => ({
-            tools: e.status === "start" ? [...i.tools, { name: e.name, status: "start" }] : i.tools.map((t, k) => (k === i.tools.length - 1 && t.name === e.name ? { ...t, status: e.status } : t)),
+            tools:
+              e.status === "start"
+                ? [...i.tools, { name: e.name, status: "start", detail: e.detail }]
+                : i.tools.map((t, k) => (k === i.tools.length - 1 && t.name === e.name ? { ...t, status: e.status, ...(e.detail ? { detail: e.detail } : {}) } : t)),
           })),
         confirm: (req) => new Promise<ConfirmDecision>((resolve) => setPending({ kind: "confirm", req, resolve })),
         ask: (req) => new Promise<string>((resolve) => setPending({ kind: "ask", req, resolve })),
@@ -137,7 +144,8 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
       patch(id, () => ({
         status: "done",
         // Агент зі структурованим виходом: показуємо результат завершального інструмента, а не вступний текст.
-        ...(ag.finalTool ? { output: out } : {}),
+        ...(ag.finalTool || ag.serverTools?.length ? { output: out } : {}),
+        links: run.sources,
         runId: run.id,
         usage: run.usage,
         steps: run.steps,
@@ -145,6 +153,8 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
         truncated: stopReason === "max_tokens",
       }));
       setSession((st) => ({ turns: [...st.turns, { task: text, output: summarizeOutput(ag.id, out) }].slice(-8) }));
+      const proposed = (run.toolCalls ?? []).filter((t) => t.name === "propose_memory" && t.ok).length;
+      if (proposed > 0) toast(`Агент запропонував фактів: ${proposed}. Підтвердьте їх у розділі «Пам'ять».`);
     } catch (e) {
       if (e instanceof ApiError && e.kind === "aborted") {
         patch(id, () => ({ status: "stopped" }));
@@ -165,7 +175,14 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
     if (!item.runId) return;
     const run = await db.runs.get(item.runId);
     if (!run) return;
-    await saveRunAsArtifact(run, agent.output.saveAs ?? "document");
+    const ag = getAgent(item.agentId);
+    if (ag.output.saveAs === "search_report") {
+      // Звіт пошуку зберігається разом зі списком джерел.
+      const list = (run.sources ?? []).map((s, i) => `${i + 1}. [${s.title}](${s.url})`).join("\n");
+      await saveTextArtifact(run.output + (list ? `\n\n## Джерела\n${list}` : ""), "search_report", { parentRunId: run.id, title: `Пошук: ${run.input}`, sources: run.sources });
+    } else {
+      await saveRunAsArtifact(run, ag.output.saveAs ?? "document");
+    }
     patch(item.id, () => ({ saved: true }));
     toast("Збережено в бібліотеці");
   }
@@ -248,6 +265,7 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
                     <span key={k} className={"tool " + t.status}>
                       {t.status === "ok" ? "✓ " : t.status === "error" ? "✕ " : "… "}
                       {TOOL_LABEL[t.name] ?? t.name}
+                      {t.detail ? `: ${t.detail.length > 40 ? t.detail.slice(0, 40) + "…" : t.detail}` : ""}
                     </span>
                   ))}
                 </div>
@@ -281,6 +299,7 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
               ) : (
                 <div className="ptext">{it.output}</div>
               )}
+              {it.status === "done" && it.links && it.links.length > 0 && <SourceList sources={it.links} />}
               {it.status === "error" && (
                 <div className="warn mx">
                   <Icon name="alert" size={18} />
@@ -293,6 +312,7 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
                 <p className="note mx tnum">
                   вхід {fmt(it.usage.input)} · вихід {fmt(it.usage.output)}
                   {it.usage.cacheRead ? ` · з кешу ${fmt(it.usage.cacheRead)}` : ""} · {money(it.usage.costUsd)}
+                  {it.usage.searches ? ` · пошуків ${it.usage.searches}` : ""}
                   {it.sources !== undefined ? ` · джерел контексту ${it.sources}` : ""}
                   {it.steps && it.steps > 1 ? ` · кроків ${it.steps}` : ""}
                 </p>

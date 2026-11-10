@@ -4,6 +4,7 @@ import { setSession } from "../core/session";
 import { db } from "../db/db";
 import { useLive } from "../db/useLive";
 import { Icon } from "../ui/Icon";
+import { SourceList } from "../ui/SourceList";
 import { money, when } from "../ui/format";
 import { toast } from "../ui/toast";
 
@@ -53,6 +54,7 @@ export function LibraryScreen() {
                 {open === a.id && (
                   <>
                     <div className="ptext">{a.content}</div>
+                    {a.sources && a.sources.length > 0 && <SourceList sources={a.sources} />}
                     {a.versions.length > 1 && (
                       <div className="versions">
                         <span className="dt">Версії · {a.versions.length}</span>

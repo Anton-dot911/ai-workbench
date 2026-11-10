@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { BackupMeta } from "../db/backup";
-import { addMemory, db, getProfile, parseTags, saveProfile, updateMemory } from "../db/db";
+import { acceptProposal, addMemory, db, getProfile, parseTags, rejectProposal, saveProfile, updateMemory } from "../db/db";
 import type { StorageHealth } from "../db/health";
 import { useLive } from "../db/useLive";
-import type { MemoryItem, Profile } from "../core/types";
+import type { MemoryItem, Profile, Proposal } from "../core/types";
 import { FactForm } from "../ui/FactForm";
 import { ImportSheet } from "../ui/ImportSheet";
 import { Icon } from "../ui/Icon";
@@ -117,6 +117,8 @@ export function MemoryScreen({ offer, health, onRestore, onDismissOffer }: Memor
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<MemoryItem | "new" | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const proposals = useLive(() => db.proposals.where("status").equals("pending").sortBy("createdAt"), [] as Proposal[]);
+  const [editingProposal, setEditingProposal] = useState<Proposal | null>(null);
   // Форма профілю створюється один раз після завантаження, далі вона сама джерело правди.
   const [seed, setSeed] = useState<Profile | null>(null);
   useEffect(() => {
@@ -149,7 +151,56 @@ export function MemoryScreen({ offer, health, onRestore, onDismissOffer }: Memor
           </div>
         </section>
       )}
-      <h2 className="sec first">Профіль</h2>
+      {proposals.length > 0 && (
+        <>
+          <h2 className="sec first">На підтвердження · {proposals.length}</h2>
+          <p className="note first">Агенти лише пропонують факти. У пам'ять вони потрапляють після вашого підтвердження.</p>
+          <div className="list">
+            {proposals.map((p) => (
+              <div key={p.id} className={"item fact prop" + (p.origin === "web" ? " web" : "")}>
+                {p.origin === "web" && <p className="webwarn">З веб-джерел: перевірте особливо уважно</p>}
+                <p className="ftext">{p.text}</p>
+                {p.tags.length > 0 && (
+                  <div className="chips">
+                    {p.tags.map((t) => (
+                      <span key={t}>{t}</span>
+                    ))}
+                  </div>
+                )}
+                {p.reason && <p className="dt">Чому: {p.reason}</p>}
+                <div className="acts nopad">
+                  <button
+                    className="btn primary"
+                    onClick={async () => {
+                      try {
+                        await acceptProposal(p.id);
+                        toast("Додано в пам'ять");
+                      } catch (e) {
+                        toast(e instanceof Error ? e.message : "Не вдалося додати");
+                      }
+                    }}
+                  >
+                    Прийняти
+                  </button>
+                  <button className="btn" onClick={() => setEditingProposal(p)}>
+                    Редагувати
+                  </button>
+                  <button
+                    className="btn"
+                    onClick={async () => {
+                      await rejectProposal(p.id);
+                      toast("Відхилено: агент більше не запропонує це");
+                    }}
+                  >
+                    Відхилити
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      <h2 className={"sec" + (proposals.length ? "" : " first")}>Профіль</h2>
       {seed ? <ProfileCard initial={seed} live={profile} /> : <p className="note">Завантаження…</p>}
       <p className="note">Профіль іде в кешований префікс кожного запиту. Замок «приховано» виключає поле з запитів.</p>
 
@@ -215,6 +266,25 @@ export function MemoryScreen({ offer, health, onRestore, onDismissOffer }: Memor
       )}
 
       <ImportSheet open={importOpen} onClose={() => setImportOpen(false)} />
+      <Sheet open={editingProposal !== null} title="Редагувати перед збереженням" onClose={() => setEditingProposal(null)}>
+        {editingProposal && (
+          <FactForm
+            initial={{ text: editingProposal.text, tags: editingProposal.tags, pinned: !!editingProposal.pinned }}
+            hint={editingProposal.origin === "web" ? "Цей факт запропоновано після читання веб-джерел. Збережіть лише те, у чому впевнені." : undefined}
+            submitLabel="Зберегти в пам'ять"
+            onCancel={() => setEditingProposal(null)}
+            onSubmit={async (v) => {
+              try {
+                await acceptProposal(editingProposal.id, { text: v.text, tags: v.tags, pinned: v.pinned });
+                setEditingProposal(null);
+                toast("Додано в пам'ять");
+              } catch (e) {
+                toast(e instanceof Error ? e.message : "Не вдалося додати");
+              }
+            }}
+          />
+        )}
+      </Sheet>
       <Sheet open={editing !== null} title={editing === "new" ? "Новий факт" : "Редагувати факт"} onClose={() => setEditing(null)}>
         <FactForm
           initial={editing && editing !== "new" ? { text: editing.text, tags: editing.tags, pinned: editing.pinned === 1 } : undefined}
