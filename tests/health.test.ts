@@ -63,10 +63,10 @@ test("лічильники й порожнеча: мова за замовчув
   assert.equal(profileFilled(undefined), false);
 });
 
-test("схема v2 зберегла дані v1: старі таблиці читаються після оновлення", async () => {
+test("нові версії схеми зберегли дані v1: старі таблиці читаються після оновлення", async () => {
   await addMemory({ text: "Старий факт", tags: [], pinned: true, source: "user" });
   await db.close();
   await db.open();
   assert.equal(await db.memory.count(), 1);
-  assert.equal(db.verno, 2);
+  assert.ok(db.verno >= 3, `версія схеми ${db.verno}`);
 });

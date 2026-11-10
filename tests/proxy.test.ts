@@ -95,3 +95,56 @@ test("обрив клієнтом: витрати все одно врахову
   const status = await (await GET(new Request("http://x/api/claude", { headers: { "x-app-token": "secret-token" } }))).json();
   assert.ok(status.spent.dayUsd > 0, "витрати мають бути записані");
 });
+
+test("серверні інструменти: дозволено лише web_search_20250305 із max_uses у межах ліміту", async () => {
+  process.env.DAILY_LIMIT_USD = "1"; // щоб перевірка найгіршого випадку не заважала
+  try {
+    await serverToolAllowlist();
+  } finally {
+    process.env.DAILY_LIMIT_USD = "0.05";
+  }
+});
+
+async function serverToolAllowlist() {
+  const withTool = (tool: object) => ({ ...good, tools: [tool] });
+  assert.equal((await call(withTool({ type: "code_execution_20250522", name: "code_execution" }))).status, 400);
+  const noUses = await call(withTool({ type: "web_search_20250305", name: "web_search" }));
+  assert.equal(noUses.status, 400);
+  assert.equal((await call(withTool({ type: "web_search_20250305", name: "web_search", max_uses: 11 }))).status, 400);
+  assert.equal((await call({ ...good, tools: "web_search" })).status, 400);
+  assert.equal(upstreamCalls.length, 0, "жоден недозволений запит не дійшов до Anthropic");
+  const ok = await call(withTool({ type: "web_search_20250305", name: "web_search", max_uses: 10 }));
+  assert.equal(ok.status, 200);
+  await ok.text();
+  // клієнтські інструменти (без type або custom) проходять
+  const custom = await call({ ...good, tools: [{ name: "x", description: "d", input_schema: { type: "object" } }] });
+  assert.equal(custom.status, 200);
+  await custom.text();
+}
+
+test("найгірший випадок для запиту з веб-пошуком враховує вартість пошуків", async () => {
+  // денний ліміт 0.05: запит на ≈$0.012 токенів проходить, а з 10 пошуками (+$0.10) уже ні
+  const plain = await call(good);
+  assert.equal(plain.status, 200);
+  await plain.text();
+  resetMemoryStore();
+  const search = await call({ ...good, tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 10 }] });
+  assert.equal(search.status, 429);
+  assert.equal((await search.json()).error.type, "budget_exceeded");
+});
+
+test("пошуки зі стріму (server_tool_use у usage) тарифікуються по $0.01", async () => {
+  globalThis.fetch = (async () => {
+    const ev = [
+      { type: "message_start", message: { usage: { input_tokens: 1000, output_tokens: 1 } } },
+      { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "ok" } },
+      { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 2000, server_tool_use: { web_search_requests: 3 } } },
+    ];
+    return new Response(ev.map((e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join(""), { status: 200, headers: { "content-type": "text/event-stream" } });
+  }) as typeof fetch;
+  await (await call(good)).text();
+  const status = await (await GET(new Request("http://x/api/claude", { headers: { "x-app-token": "secret-token" } }))).json();
+  // 1000 вх × $2 + 2000 вих × $10 = $0.022, плюс 3 пошуки = $0.03
+  assert.ok(Math.abs(status.spent.dayUsd - 0.052) < 1e-6, `витрачено ${status.spent.dayUsd}`);
+});

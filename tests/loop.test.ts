@@ -85,7 +85,7 @@ test("цикл: інструмент → підтвердження → резу
   assert.equal(second.at(-2).content.find((b: any) => b.type === "tool_use").id, "toolu_1");
   assert.equal(second.at(-1).content[0].type, "tool_result");
   assert.equal(second.at(-1).content[0].tool_use_id, "toolu_1");
-  assert.equal(bodies[0].tools.length, 5, "інструменти агента передаються в запиті");
+  assert.equal(bodies[0].tools.length, 6, "інструменти агента передаються в запиті");
 });
 
 test("користувач відхилив зміну → tool_result з is_error, фрагмент не змінено", async () => {
