@@ -45,6 +45,28 @@ const toolTurn = (t) => {
   ]);
 };
 const backups = { latest: null };
+const searchStep = () => sse([
+  { type: "message_start", message: { usage: { input_tokens: 800, output_tokens: 1 } } },
+  { type: "content_block_start", index: 0, content_block: { type: "server_tool_use", id: "srv_1", name: "web_search", input: {} } },
+  { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"query": "web push ios"}' } },
+  { type: "content_block_stop", index: 0 },
+  { type: "content_block_start", index: 1, content_block: { type: "web_search_tool_result", tool_use_id: "srv_1", content: [{ type: "web_search_result", url: "https://webkit.org/blog/1", title: "WebKit", encrypted_content: "ENC", page_age: "2026" }] } },
+  { type: "content_block_stop", index: 1 },
+  { type: "message_delta", delta: { stop_reason: "pause_turn" }, usage: { output_tokens: 60, server_tool_use: { web_search_requests: 1 } } },
+]);
+const answerStep = () => sse([
+  { type: "message_start", message: { usage: { input_tokens: 1500, output_tokens: 1 } } },
+  { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+  { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Web Push працює на iOS 16.4+" } },
+  { type: "content_block_delta", index: 0, delta: { type: "citations_delta", citation: { type: "web_search_result_location", url: "https://webkit.org/blog/1", title: "WebKit", encrypted_index: "e", cited_text: "…" } } },
+  { type: "content_block_stop", index: 0 },
+  { type: "content_block_start", index: 1, content_block: { type: "text", text: "" } },
+  { type: "content_block_delta", index: 1, delta: { type: "text_delta", text: " лише для PWA." } },
+  { type: "content_block_delta", index: 1, delta: { type: "citations_delta", citation: { type: "web_search_result_location", url: "https://developer.apple.com/docs", title: "Apple Docs", encrypted_index: "e2", cited_text: "…" } } },
+  { type: "content_block_stop", index: 1 },
+  { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 120, server_tool_use: { web_search_requests: 1 } } },
+]);
+let seq = [];
 w.fetch = async (url, init = {}) => {
   if (String(url).startsWith("/api/backup")) {
     const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json" } });
@@ -63,7 +85,8 @@ w.fetch = async (url, init = {}) => {
     const last = body.messages.at(-1);
     const isResult = Array.isArray(last.content) && last.content[0]?.type === "tool_result";
     let payload = textTurn();
-    if (nextTool && !isResult) { payload = toolTurn(nextTool); nextTool = null; }
+    if (seq.length) payload = seq.shift()();
+    if (!seq.length && nextTool && !isResult) { payload = toolTurn(nextTool); nextTool = null; }
     return new Response(payload, { status: 200, headers: { "content-type": "text/event-stream" } });
   }
   return new Response(JSON.stringify({ ok: true, spent: { dayUsd: 0.5, monthUsd: 2 }, limits: { dayUsd: 3, monthUsd: 30 }, prices: PRICES, tz: "Europe/Kyiv" }), { status: 200, headers: { "content-type": "application/json" } });
@@ -224,6 +247,50 @@ const check = (name, cond, extra = "") => { console.log((cond ? "PASS" : "FAIL")
   check("у бібліотеці є артефакт-пост", qa(".itemhead .nm").some((e) => /Другий варіант/.test(e.textContent)));
   await tab("Робота");
   setVal(taskInput(), ""); await sleep(30);
+
+  // Етап 3c: «Пошук» (веб-пошук, пауза, цитати, джерела), пропозиції пам'яті, збереження звіту
+  await tab("Робота");
+  const feedCards = () => [...q("section[aria-label=\"Робота\"]").querySelectorAll("section.card")];
+  const before3c = posts.length;
+  seq = [searchStep, () => toolTurn({ name: "propose_memory", input: { text: "Користувач досліджує Web Push для своєї PWA", tags: ["pwa"], reason: "пряма тема запиту" } }), answerStep];
+  setVal(taskInput(), "/пошук Web Push на iOS"); await sleep(60); q(".go").click(); await sleep(1500);
+  check("агент «Пошук» вибрано командою", q(".agentbtn h1").textContent === "Пошук");
+  const firstReq = posts[before3c];
+  const wsTool = firstReq.tools.find((t) => t.type === "web_search_20250305");
+  check("запит містить веб-пошук з max_uses 10 і клієнтські інструменти", wsTool?.max_uses === 10 && firstReq.tools.some((t) => t.name === "propose_memory"), JSON.stringify(wsTool));
+  check("після паузи запит завершується повідомленням асистента без tool_result", posts[before3c + 1].messages.at(-1).role === "assistant" && posts[before3c + 1].messages.at(-1).content.some((b) => b.type === "web_search_tool_result" && b.content[0].encrypted_content === "ENC"));
+  check("за пропозицією пам'яті йде третій запит із tool_result", posts.length === before3c + 3 && posts[before3c + 2].messages.at(-1).content[0].type === "tool_result");
+  const searchCard = feedCards().at(-1);
+  check("мітки: веб-пошук із запитом і пропозиція пам'яті", /веб-пошук: web push ios/.test(searchCard.textContent) && /пропозиція пам'яті/.test(searchCard.textContent), searchCard.querySelector(".toolrow")?.textContent);
+  check("відповідь із маркерами цитат", /Web Push працює на iOS 16\.4\+ \[1\] лише для PWA\. \[2\]/.test(searchCard.querySelector(".ptext").textContent), searchCard.querySelector(".ptext").textContent);
+  const links = [...searchCard.querySelectorAll(".srcs a")];
+  check("джерела: два посилання, відкриваються в новій вкладці безпечно", links.length === 2 && links[0].href === "https://webkit.org/blog/1" && links[0].rel.includes("noopener") && links[0].target === "_blank");
+  check("у підсумку вартості видно кількість пошуків", /пошуків 2/.test(searchCard.textContent), searchCard.querySelector(".note.mx.tnum")?.textContent);
+  check("тост про запропонований факт", /запропонував фактів: 1/.test(q(".toast").textContent), q(".toast").textContent);
+  check("на вкладці «Пам'ять» є лічильник пропозицій", q("#t-memory .badge")?.textContent === "1" || [...qa(".tab")].find((t) => t.textContent.includes("Пам'ять"))?.querySelector(".badge")?.textContent === "1");
+  [...searchCard.querySelectorAll("button")].find((b) => b.textContent.includes("Зберегти")).click(); await sleep(300);
+  await tab("Бібліотека");
+  check("звіт збережено в бібліотеці як «Пошук: …» із джерелами", qa(".itemhead .nm").some((e) => /Пошук: Web Push на iOS/.test(e.textContent)));
+  byText(".itemhead", "Пошук: Web Push").click(); await sleep(60);
+  check("у збереженому звіті є список джерел", qa(".item .srcs a").length === 2);
+  await tab("Пам'ять");
+  check("черга: пропозиція з позначкою «З веб-джерел»", /На підтвердження · 1/.test(q("section[aria-label=\"Пам'ять\"]").textContent) && !!q(".prop.web .webwarn"));
+  check("пропозиція ще не є фактом", !byText(".fact:not(.prop) .ftext", "досліджує Web Push"));
+  byText(".prop button", "Прийняти").click(); await sleep(400);
+  check("після прийняття факт у пам'яті, черга порожня, лічильника немає", !!byText(".fact:not(.prop) .ftext", "досліджує Web Push") && !q(".prop") && ![...qa(".tab")].find((t) => t.textContent.includes("Пам'ять")).querySelector(".badge"));
+
+  // відхилення: той самий факт повторно не пропонується
+  await tab("Робота");
+  nextTool = { name: "propose_memory", input: { text: "Другий кандидат у факти про проєкт", tags: [] } };
+  setVal(taskInput(), "/док нотатка про проєкт"); await sleep(60); q(".go").click(); await sleep(900);
+  await tab("Пам'ять");
+  check("друга пропозиція від агента без веб-позначки", !!q(".prop") && !q(".prop.web"));
+  byText(".prop button", "Відхилити").click(); await sleep(300);
+  check("відхилена пропозиція зникла з черги й не стала фактом", !q(".prop") && !byText(".fact .ftext", "Другий кандидат"));
+  await tab("Робота");
+  nextTool = { name: "propose_memory", input: { text: "Другий кандидат у факти про проєкт", tags: [] } };
+  setVal(taskInput(), "/док ще раз"); await sleep(60); q(".go").click(); await sleep(900);
+  check("повторна пропозиція відхиленого блокується (tool_result з помилкою)", /відхилив/.test(JSON.stringify(posts.at(-1).messages.at(-1).content)));
 
   // Імпорт бази: Пам'ять → імпорт пакета
   await tab("Параметри");
