@@ -16,6 +16,7 @@ const P = {
   review: '<circle cx="12" cy="12" r="8.5"/><path d="M8 12.3l2.8 2.8 5.5-5.6"/>',
   posts: '<path d="M4 20l1-4L16 5l3 3L8 19z"/><path d="M14 7l3 3M4 22h16"/>',
   again: '<path d="M19 8a8 8 0 10 1.5 6"/><path d="M19 4v4h-4"/>',
+  search: '<circle cx="11" cy="11" r="6"/><path d="M16 16l4.5 4.5"/>',
   chevd: '<path d="M6 9l6 6 6-6"/>',
   tCtx: '<path d="M12 4l8 4-8 4-8-4z"/><path d="M4 12l8 4 8-4M4 16l8 4 8-4"/>',
   tMem: '<path d="M7 4h10v16l-5-4-5 4z"/>',
