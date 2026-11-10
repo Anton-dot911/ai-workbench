@@ -272,3 +272,16 @@ textarea.field { resize: vertical; line-height: 1.4; }
 /* ---- копія й діагностика ---- */
 .offer { border-color: var(--signal); box-shadow: inset 4px 0 0 var(--signal); }
 .offt { font: 600 20px/1.1 var(--label); }
+
+/* ---- етап 3c: пошук і черга пам'яті ---- */
+.tabico { position: relative; display: inline-flex; }
+.badge { position: absolute; top: -5px; right: -10px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; background: var(--signal); color: var(--on-signal); font: 600 12px/18px var(--ui); font-style: normal; text-align: center; }
+.prop { border-left: 4px solid var(--signal); }
+.prop.web { border-left-color: var(--bad); }
+.webwarn { margin: 0 0 6px; color: var(--bad); font-size: 14px; font-weight: 600; }
+.srcs { padding: 4px 14px 8px; }
+.srcs ol { margin: 4px 0 0; padding-left: 22px; }
+.srcs li { margin: 6px 0; font-size: 15px; overflow-wrap: anywhere; }
+.srcs li a { color: var(--brand); }
+@media (prefers-color-scheme: dark) { .srcs li a { color: #8fb0e8; } }
+.srcs li .dt { display: block; }

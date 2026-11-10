@@ -7,6 +7,8 @@ import { sessionTask, setSession, useSession } from "./core/session";
 import { clearToken, getToken } from "./core/settings";
 import { backupMeta, isAutoBackup, pushBackup, restoreBackup, type BackupMeta } from "./db/backup";
 import { useDataVersion } from "./db/changes";
+import { db } from "./db/db";
+import { useLive } from "./db/useLive";
 import { checkHealth, dataCounts, isLocalEmpty, type StorageHealth } from "./db/health";
 import { ContextScreen } from "./screens/ContextScreen";
 import { Gate } from "./screens/Gate";
@@ -47,6 +49,7 @@ export default function App() {
   const [health, setHealth] = useState<StorageHealth | null>(null);
   const [offer, setOffer] = useState<BackupMeta | null>(null);
   const [offerDismissed, setOfferDismissed] = useState(false);
+  const pendingProposals = useLive(() => db.proposals.where("status").equals("pending").count(), 0);
   const session = useSession();
   const agent = getAgent(session.agentId);
   const dataVersion = useDataVersion();
@@ -191,7 +194,10 @@ export default function App() {
       <nav className="tabs" aria-label="Розділи">
         {TABS.map((t) => (
           <button key={t.id} className="tab" aria-current={tab === t.id ? "page" : undefined} onClick={() => setTab(t.id)}>
-            <Icon name={t.icon} />
+            <span className="tabico">
+              <Icon name={t.icon} />
+              {t.id === "memory" && pendingProposals > 0 && <i className="badge" aria-label={`${pendingProposals} на підтвердження`}>{pendingProposals}</i>}
+            </span>
             {t.label}
           </button>
         ))}
