@@ -2,6 +2,7 @@ import { db } from "../db/db";
 import { TOOL_HANDLERS } from "../tools/handlers";
 import type { AskRequest, ConfirmDecision, ConfirmRequest, ToolContext, ToolResult } from "../tools/types";
 import { ApiError, streamMessage, type ContentBlock, type MessageRequest } from "./claude";
+import { renderCitations, type Source } from "./citations";
 import { resolveContext } from "./contextBuilder";
 import { costFor } from "./prices";
 import { MODEL_MAP } from "./settings";
@@ -10,6 +11,8 @@ import type { AgentManifest, ContextPacket, Run, Task } from "./types";
 export interface ToolEvent {
   name: string;
   status: "start" | "ok" | "error";
+  /** Напр. пошуковий запит або код помилки. */
+  detail?: string;
 }
 
 export interface RunUi {
@@ -25,6 +28,7 @@ export interface RunResult {
   run: Run;
   text: string;
   stopReason: string | null;
+  sources: Source[];
 }
 
 /** Запобіжник від нескінченного циклу «модель → інструмент → модель». */
@@ -47,7 +51,7 @@ export function buildRequest(agent: AgentManifest, ctx: ContextPacket, task: Tas
     max_tokens: agent.maxTokens,
     ...(agent.temperature !== undefined ? { temperature: agent.temperature } : {}),
     system,
-    ...(agent.tools.length ? { tools: agent.tools } : {}),
+    ...(agent.tools.length || agent.serverTools?.length ? { tools: [...agent.tools, ...(agent.serverTools ?? [])] } : {}),
     // Агент зі структурованим виходом зобов'язаний викликати завершальний інструмент.
     ...(agent.finalTool ? { tool_choice: { type: "tool", name: agent.finalTool, disable_parallel_tool_use: true } } : {}),
     messages: [{ role: "user", content }],
@@ -83,10 +87,18 @@ export async function runAgent(agent: AgentManifest, task: Task, ui: RunUi): Pro
   const { packet: ctx } = await resolveContext(agent, task);
   const req = buildRequest(agent, ctx, task);
   const messages = [...req.messages];
-  const toolCtx: ToolContext = { signal: ui.signal, calls: {}, ui: { confirm: ui.confirm, ask: ui.ask } };
+  const toolCtx: ToolContext = {
+    signal: ui.signal,
+    calls: {},
+    agentId: agent.id,
+    // Агент із веб-пошуком читає зовнішній вміст: його пропозиції пам'яті позначаються особливо.
+    origin: agent.serverTools?.length ? "web" : "user",
+    ui: { confirm: ui.confirm, ask: ui.ask },
+  };
+  const stepBlocks: ContentBlock[][] = [];
   let finalOutput: string | null = null;
 
-  const total = { input: 0, output: 0, cacheRead: 0, costUsd: 0 };
+  const total = { input: 0, output: 0, cacheRead: 0, costUsd: 0, searches: 0 };
   const toolCalls: { name: string; ok: boolean }[] = [];
   let text = "";
   let gap = false;
@@ -99,6 +111,14 @@ export async function runAgent(agent: AgentManifest, task: Task, ui: RunUi): Pro
     const res = await streamMessage({ ...req, messages }, {
       token: ui.token,
       signal: ui.signal,
+      onBlock: (block, phase) => {
+        // Серверний веб-пошук: показуємо запит і результат як звичайні кроки інструментів.
+        if (block.type === "server_tool_use" && phase === "stop") ui.onTool?.({ name: block.name ?? "web_search", status: "start", detail: (block.input as { query?: string } | undefined)?.query });
+        if (block.type === "web_search_tool_result" && phase === "start") {
+          const err = (block.content as { type?: string; error_code?: string } | undefined)?.type === "web_search_tool_result_error";
+          ui.onTool?.({ name: "web_search", status: err ? "error" : "ok", detail: err ? (block.content as { error_code?: string }).error_code : undefined });
+        }
+      },
       onText: (d) => {
         if (gap) {
           text += "\n\n";
@@ -115,6 +135,15 @@ export async function runAgent(agent: AgentManifest, task: Task, ui: RunUi): Pro
     total.output += res.usage.output_tokens ?? 0;
     total.cacheRead += res.usage.cache_read_input_tokens ?? 0;
     total.costUsd += costFor(req.model, res.usage);
+    total.searches += res.usage.server_tool_use?.web_search_requests ?? 0;
+    stepBlocks.push(res.content);
+
+    // Серверний інструмент не вклався в один запит: повертаємо відповідь без змін і продовжуємо.
+    if (res.stopReason === "pause_turn") {
+      messages.push({ role: "assistant", content: res.content.filter((b) => b.type !== "text" || (b.text ?? "").length > 0) });
+      if (steps >= MAX_STEPS) throw new Error(`Агент перевищив ліміт кроків (${MAX_STEPS}). Спробуйте уточнити задачу.`);
+      continue;
+    }
 
     const calls = res.content.filter((b) => b.type === "tool_use");
     if (res.stopReason !== "tool_use" || calls.length === 0) break;
@@ -142,7 +171,10 @@ export async function runAgent(agent: AgentManifest, task: Task, ui: RunUi): Pro
     if (steps >= MAX_STEPS) throw new Error(`Агент перевищив ліміт кроків (${MAX_STEPS}). Спробуйте уточнити задачу.`);
   }
 
-  const output = finalOutput !== null ? finalOutput : text.trim();
+  // Для агентів із веб-пошуком відповідь збирається з блоків із маркерами цитат; інакше це накопичений потік.
+  const cited = agent.serverTools?.length ? renderCitations(stepBlocks) : null;
+  const output = finalOutput !== null ? finalOutput : cited ? cited.text.trim() : text.trim();
+  const sources = finalOutput === null && cited ? cited.sources : [];
   const run: Run = {
     id: crypto.randomUUID(),
     agentId: agent.id,
@@ -154,7 +186,8 @@ export async function runAgent(agent: AgentManifest, task: Task, ui: RunUi): Pro
     createdAt: Date.now(),
     steps,
     toolCalls,
+    ...(sources.length ? { sources } : {}),
   };
   await db.runs.add(run);
-  return { run, text: output, stopReason };
+  return { run, text: output, stopReason, sources };
 }

@@ -78,7 +78,7 @@ export async function getStatus(token: string, signal?: AbortSignal): Promise<St
 
 export async function streamMessage(
   req: MessageRequest,
-  opts: { token: string; signal?: AbortSignal; onText?: (delta: string) => void },
+  opts: { token: string; signal?: AbortSignal; onText?: (delta: string) => void; onBlock?: (block: ContentBlock, phase: "start" | "stop") => void },
 ): Promise<MessageResult> {
   let res: Response;
   try {
@@ -112,9 +112,13 @@ export async function streamMessage(
         case "message_start":
           usage = { ...usage, ...(ev.message?.usage ?? {}) };
           break;
-        case "content_block_start":
-          blocks[ev.index] = { ...ev.content_block, ...(ev.content_block?.type === "text" ? { text: "" } : {}) };
+        case "content_block_start": {
+          const cb: ContentBlock = { ...ev.content_block, ...(ev.content_block?.type === "text" ? { text: "" } : {}) };
+          if (cb.type === "text" && !Array.isArray(cb.citations)) delete cb.citations;
+          blocks[ev.index] = cb;
+          opts.onBlock?.(cb, "start");
           break;
+        }
         case "content_block_delta": {
           const b = blocks[ev.index];
           if (!b) break;
@@ -123,13 +127,17 @@ export async function streamMessage(
             opts.onText?.(ev.delta.text);
           } else if (ev.delta?.type === "input_json_delta") {
             jsonBufs.set(ev.index, (jsonBufs.get(ev.index) ?? "") + ev.delta.partial_json);
+          } else if (ev.delta?.type === "citations_delta") {
+            // Цитати веб-пошуку накопичуються в текстовому блоці: їх треба повертати в API без змін.
+            b.citations = [...(Array.isArray(b.citations) ? b.citations : []), ev.delta.citation];
           }
           break;
         }
         case "content_block_stop": {
           const b = blocks[ev.index];
           const raw = jsonBufs.get(ev.index);
-          if (b && b.type === "tool_use") b.input = raw ? JSON.parse(raw) : {};
+          if (b && (b.type === "tool_use" || b.type === "server_tool_use")) b.input = raw ? JSON.parse(raw) : {};
+          if (b) opts.onBlock?.(b, "stop");
           break;
         }
         case "message_delta":

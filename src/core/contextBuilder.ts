@@ -7,8 +7,12 @@ import type { AgentManifest, ContextPacket, Profile, Task, Tier } from "./types"
 export const estimateTokens = (s: string): number => Math.ceil(s.length / 3.5);
 
 // Закриваючі теги наших обгорток у даних нейтралізуються, щоб дані не «вийшли» з тега.
-const CLOSERS = /<\/(profile|facts|memory|examples|documents|selection|upstream|history|context|task)/gi;
+const CLOSERS = /<\/(profile|facts|memory|examples|documents|selection|upstream|history|context|task|untrusted_content)/gi;
 export const neutralize = (s: string): string => s.replace(CLOSERS, "<\\/$1");
+
+/** Звіти веб-пошуку містять переказ зовнішніх сторінок: передаються моделі як недовірені дані. */
+export const untrusted = (kind: string, text: string): string =>
+  kind === "search_report" ? `<untrusted_content source="web-search-report">\n${text}\n</untrusted_content>` : text;
 
 export function xml(tag: string, text: string): string {
   return `<${tag}>\n${neutralize(text)}\n</${tag}>`;
@@ -168,8 +172,8 @@ export async function collectParts(agent: AgentManifest, task: Task): Promise<Pa
         // У контекст іде резюме; повний текст лише для найближчого, якщо він короткий.
         const items = rows.map((a, i) =>
           i === 0 && estimateTokens(a.content) <= 1500
-            ? `#${a.id.slice(0, 8)} «${neutralize(a.title)}»:\n${neutralize(a.content)}`
-            : `#${a.id.slice(0, 8)} «${neutralize(a.title)}»: ${neutralize(a.summary)}`,
+            ? `#${a.id.slice(0, 8)} «${neutralize(a.title)}»:\n${untrusted(a.type, neutralize(a.content))}`
+            : `#${a.id.slice(0, 8)} «${neutralize(a.title)}»: ${untrusted(a.type, neutralize(a.summary))}`,
         );
         parts.push({
           id: "artifacts",
@@ -253,7 +257,7 @@ export async function collectParts(agent: AgentManifest, task: Task): Promise<Pa
       detail: "додано вручну",
       open: "<documents>",
       close: "</documents>",
-      items: [`#${a.id.slice(0, 8)} «${neutralize(a.title)}»:\n${neutralize(a.content)}`],
+      items: [`#${a.id.slice(0, 8)} «${neutralize(a.title)}»:\n${untrusted(a.type, neutralize(a.content))}`],
       defaultOn: true,
       manual: true,
     });

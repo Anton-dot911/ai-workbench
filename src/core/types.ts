@@ -32,7 +32,8 @@ export interface AgentManifest {
   systemPrompt: string;
   contextNeeds: ContextNeed[];
   tools: ToolDef[];
-  serverTools?: string[];
+  /** Серверні інструменти Anthropic (повні визначення): виконуються на боці API, напр. web_search. */
+  serverTools?: Record<string, unknown>[];
   /** Завершальний інструмент: модель зобов'язана його викликати (tool_choice), і після успішного виклику запуск завершується. Його вхід і є результат агента. */
   finalTool?: string;
   output: { kind: "text" | "markdown" | "code" | "json" | "document"; schema?: JSONSchema; saveAs?: ArtifactType };
@@ -111,6 +112,8 @@ export interface Artifact {
   embedding?: number[];
   workspaceId?: string;
   parentRunId?: string;
+  /** Джерела (для звітів пошуку). */
+  sources?: { url: string; title: string }[];
   versions: { at: number; content: string }[];
   updatedAt: number;
 }
@@ -121,12 +124,28 @@ export interface Run {
   input: string;
   contextSnapshot: ContextPacket;
   output: string;
-  usage: { input: number; output: number; cacheRead: number; costUsd: number };
+  usage: { input: number; output: number; cacheRead: number; costUsd: number; searches?: number };
   chainId?: string;
   createdAt: number;
+  /** Джерела, на які агент послався (веб-пошук). */
+  sources?: { url: string; title: string }[];
   /** Кількість викликів моделі в циклі tool use. */
   steps?: number;
   toolCalls?: { name: string; ok: boolean }[];
+}
+
+/** Пропозиція факту від агента: потрапляє в чергу, а в пам'ять лише після підтвердження користувача. */
+export interface Proposal {
+  id: string;
+  text: string;
+  tags: string[];
+  pinned?: boolean;
+  /** `web`: агент читав інтернет, тож пропозицію варто перевірити особливо уважно. */
+  origin: "user" | "web";
+  agentId: string;
+  reason?: string;
+  status: "pending" | "rejected";
+  createdAt: number;
 }
 
 export type { Usage };
