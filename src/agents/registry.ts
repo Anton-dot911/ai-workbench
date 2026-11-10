@@ -2,9 +2,10 @@ import type { AgentManifest } from "../core/types";
 import { docsAgent } from "./docs";
 import { postsAgent } from "./posts";
 import { reviewAgent } from "./review";
+import { searchAgent } from "./search";
 
 /** Реєстр агентів. Новий агент = новий маніфест у цьому списку, ядро не змінюється. */
-export const AGENTS: AgentManifest[] = [docsAgent, reviewAgent, postsAgent];
+export const AGENTS: AgentManifest[] = [docsAgent, searchAgent, reviewAgent, postsAgent];
 
 export const getAgent = (id: string): AgentManifest => AGENTS.find((a) => a.id === id) ?? AGENTS[0];
 

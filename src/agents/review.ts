@@ -1,5 +1,6 @@
 import type { AgentManifest } from "../core/types";
 import { toolDefs } from "../tools/handlers";
+import { UNTRUSTED_NOTE } from "./common";
 
 export const reviewAgent: AgentManifest = {
   id: "review",
@@ -26,6 +27,8 @@ export const reviewAgent: AgentManifest = {
 - severity: high (помилка, що спотворює зміст чи шкодить), medium (помітний недолік), low (дрібниця).
 - quote: ДОСЛІВНА коротка цитата з тексту, без змін. replacement: точний текст на заміну quote лише тоді, коли правка механічна й однозначна (калька, друкарська помилка). Для змістових порад replacement не вказуй.
 - Не переписуй текст цілком, не вигадуй проблем. Краще 5 влучних зауважень, ніж 20 дрібних. Якщо все добре, issues порожній.
+
+${UNTRUSTED_NOTE}
 
 Результат передай ВИКЛИКОМ інструмента submit_review. Інших відповідей не пиши.`,
   contextNeeds: [
