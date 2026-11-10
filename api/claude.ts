@@ -3,7 +3,7 @@
 //   POST /api/claude → пересилає запит до api.anthropic.com/v1/messages (стрімінг як є)
 // Захист: токен застосунку, білий список моделей, ліміт max_tokens, денний і місячний ліміти витрат.
 import { waitUntil } from "@vercel/functions";
-import { costUsd, resolvePrices, type PriceTable, type Usage } from "../shared/pricing.js";
+import { costUsd, resolvePrices, WEB_SEARCH_USD, type PriceTable, type Usage } from "../shared/pricing.js";
 import { safeEqual } from "./_lib/auth.js";
 import { ConfigError, createStore, readLimits, readSpent, recordSpend, type BudgetStore, type Limits } from "./_lib/budget.js";
 import { UsageTracker } from "./_lib/usage.js";
@@ -31,6 +31,7 @@ interface Ctx {
   prices: PriceTable;
   tz: string;
   maxOut: number;
+  maxSearches: number;
 }
 
 function authorize(req: Request, env: Env): Response | null {
@@ -45,8 +46,11 @@ function setup(env: Env): Ctx {
   if (!env.ANTHROPIC_API_KEY) throw new ConfigError("ANTHROPIC_API_KEY не налаштований.");
   const maxOut = Number(env.MAX_OUTPUT_TOKENS ?? 16000);
   if (!Number.isInteger(maxOut) || maxOut <= 0) throw new ConfigError("MAX_OUTPUT_TOKENS: очікується додатне ціле число");
+  const maxSearches = Number(env.MAX_WEB_SEARCHES ?? 10);
+  if (!Number.isInteger(maxSearches) || maxSearches < 0) throw new ConfigError("MAX_WEB_SEARCHES: очікується невід'ємне ціле число");
   return {
     env,
+    maxSearches,
     store: createStore(env),
     limits: readLimits(env),
     prices: resolvePrices(env.PRICES_JSON),
@@ -103,10 +107,23 @@ export async function POST(req: Request): Promise<Response> {
   }
   if (!Array.isArray(body.messages) || body.messages.length === 0) return fail(400, "invalid_request", "messages не може бути порожнім.");
 
-  // Ліміти: перевіряємо вже витрачене і найгірший випадок для цього запиту.
+  // Серверні інструменти: дозволено лише базовий веб-пошук із обов'язковим max_uses (інакше невидимі витрати).
+  let searchBudget = 0;
+  if (body.tools !== undefined && !Array.isArray(body.tools)) return fail(400, "invalid_request", "tools має бути масивом.");
+  for (const t of body.tools ?? []) {
+    if (!t || typeof t !== "object") return fail(400, "invalid_request", "Некоректний опис інструмента.");
+    if (t.type === undefined || t.type === "custom") continue;
+    if (t.type !== "web_search_20250305") return fail(400, "tool_not_allowed", `Серверний інструмент не дозволено: ${String(t.type)}.`);
+    if (!Number.isInteger(t.max_uses) || t.max_uses < 1 || t.max_uses > ctx.maxSearches) {
+      return fail(400, "invalid_request", `web_search потребує max_uses від 1 до ${ctx.maxSearches}.`);
+    }
+    searchBudget += t.max_uses * WEB_SEARCH_USD;
+  }
+
+  // Ліміти: перевіряємо вже витрачене і найгірший випадок для цього запиту (токени + пошуки).
   const now = new Date();
   const spent = await readSpent(ctx.store, now, ctx.tz);
-  const worst = costUsd(body.model, { input_tokens: Math.ceil(text.length / 2.5), output_tokens: body.max_tokens }, ctx.prices);
+  const worst = costUsd(body.model, { input_tokens: Math.ceil(text.length / 2.5), output_tokens: body.max_tokens }, ctx.prices) + searchBudget;
   if (spent.dayUsd + worst > ctx.limits.dayUsd) {
     return fail(429, "budget_exceeded", `Денний ліміт витрат: витрачено $${spent.dayUsd.toFixed(2)} із $${ctx.limits.dayUsd.toFixed(2)}.`);
   }
