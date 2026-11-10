@@ -1,5 +1,5 @@
 import Dexie, { type Table } from "dexie";
-import type { Artifact, MemoryItem, Profile, Run } from "../core/types";
+import type { Artifact, MemoryItem, Profile, Proposal, Run } from "../core/types";
 import { bumpDataVersion } from "./changes";
 
 class WorkbenchDB extends Dexie {
@@ -9,6 +9,7 @@ class WorkbenchDB extends Dexie {
   runs!: Table<Run, string>;
   /** Службові записи (маркер першого запуску, самоперевірка). */
   meta!: Table<{ key: string; value: unknown }, string>;
+  proposals!: Table<Proposal, string>;
 
   constructor() {
     super("workbench");
@@ -20,6 +21,8 @@ class WorkbenchDB extends Dexie {
     });
     // Додаткова таблиця; наявні дані не змінюються.
     this.version(2).stores({ meta: "key" });
+    // Черга пропозицій фактів від агентів.
+    this.version(3).stores({ proposals: "id, status, createdAt" });
   }
 }
 
@@ -31,7 +34,7 @@ const touch = () => {
   if (tx) tx.on("complete", bumpDataVersion);
   else bumpDataVersion();
 };
-for (const table of [db.memory, db.artifacts, db.profile] as Table<any, any>[]) {
+for (const table of [db.memory, db.artifacts, db.profile, db.proposals] as Table<any, any>[]) {
   table.hook("creating", () => {
     touch();
   });
@@ -48,15 +51,16 @@ const firstLine = (s: string): string =>
   (s.split("\n").find((l) => l.trim()) ?? "").replace(/^#+\s*/, "").trim();
 
 /** Зберігає текст як новий артефакт (версія 1). Заголовок береться з першого рядка. */
-export async function saveTextArtifact(content: string, type: Artifact["type"], opts: { parentRunId?: string; fallbackTitle?: string } = {}): Promise<Artifact> {
+export async function saveTextArtifact(content: string, type: Artifact["type"], opts: { parentRunId?: string; fallbackTitle?: string; title?: string; sources?: Artifact["sources"] } = {}): Promise<Artifact> {
   const now = Date.now();
   const artifact: Artifact = {
     id: crypto.randomUUID(),
     type,
-    title: (firstLine(content) || opts.fallbackTitle || "Без назви").slice(0, 80),
+    title: (opts.title || firstLine(content) || opts.fallbackTitle || "Без назви").slice(0, 80),
     content,
     summary: content.replace(/\s+/g, " ").trim().slice(0, 200),
     parentRunId: opts.parentRunId,
+    ...(opts.sources?.length ? { sources: opts.sources } : {}),
     versions: [{ at: now, content }],
     updatedAt: now,
   };
@@ -130,4 +134,36 @@ export async function exportAll(): Promise<Record<string, unknown>> {
     db.runs.toArray(),
   ]);
   return { app: "ai-workbench", schema: 1, exportedAt: new Date().toISOString(), profile, memory, artifacts, runs };
+}
+
+// ----- Черга пропозицій (propose_memory) -----
+
+const normText = (s: string): string => s.replace(/\s+/g, " ").trim().toLowerCase();
+
+/** Чи така сама думка вже є в пам'яті, у черзі або серед відхилених. */
+export async function proposalDuplicate(text: string): Promise<"memory" | "pending" | "rejected" | null> {
+  const n = normText(text);
+  if ((await db.memory.toArray()).some((m) => normText(m.text) === n)) return "memory";
+  const same = (await db.proposals.toArray()).find((p) => normText(p.text) === n);
+  return same ? same.status : null;
+}
+
+export async function addProposal(p: Omit<Proposal, "id" | "status" | "createdAt">): Promise<Proposal> {
+  const row: Proposal = { ...p, id: crypto.randomUUID(), status: "pending", createdAt: Date.now() };
+  await db.proposals.add(row);
+  return row;
+}
+
+/** Прийняти: факт потрапляє в пам'ять (з можливими правками користувача), пропозиція зникає з черги. */
+export async function acceptProposal(id: string, edit?: { text?: string; tags?: string[]; pinned?: boolean }): Promise<MemoryItem> {
+  const p = await db.proposals.get(id);
+  if (!p) throw new Error("Пропозицію не знайдено");
+  const item = await addMemory({ text: edit?.text ?? p.text, tags: edit?.tags ?? p.tags, pinned: edit?.pinned ?? !!p.pinned, source: "agent" });
+  await db.proposals.delete(id);
+  return item;
+}
+
+/** Відхилити: пропозиція лишається як «відхилена», щоб агент не пропонував те саме знову. */
+export async function rejectProposal(id: string): Promise<void> {
+  await db.proposals.update(id, { status: "rejected" });
 }
