@@ -32,6 +32,9 @@ export interface ToolContext {
   signal?: AbortSignal;
   /** Скільки разів у цьому запуску вже викликано кожен інструмент (включно з поточним викликом). */
   calls?: Record<string, number>;
+  /** Агент і джерело даних, з якими працює запуск (для propose_memory). */
+  agentId?: string;
+  origin?: "user" | "web";
   ui: {
     confirm?: (r: ConfirmRequest) => Promise<ConfirmDecision>;
     ask?: (r: AskRequest) => Promise<string>;
