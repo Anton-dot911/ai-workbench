@@ -41,6 +41,5 @@ ${UNTRUSTED_NOTE}
   finalTool: "submit_review",
   output: { kind: "json", saveAs: "review" },
   maxTokens: 3000,
-  temperature: 0.2,
   examples: ["language, logic, style", "facts", "code"],
 };
