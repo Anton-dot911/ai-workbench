@@ -34,7 +34,7 @@ export interface AgentManifest {
   tools: ToolDef[];
   /** Серверні інструменти Anthropic (повні визначення): виконуються на боці API, напр. web_search. */
   serverTools?: Record<string, unknown>[];
-  /** Завершальний інструмент: модель зобов'язана його викликати (tool_choice), і після успішного виклику запуск завершується. Його вхід і є результат агента. */
+  /** Завершальний інструмент: агент має його викликати; runner перевіряє виклик і повторює запит, якщо модель завершила звичайним текстом. Його вхід і є результат агента. */
   finalTool?: string;
   output: { kind: "text" | "markdown" | "code" | "json" | "document"; schema?: JSONSchema; saveAs?: ArtifactType };
   maxTokens: number;
