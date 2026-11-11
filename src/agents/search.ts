@@ -53,6 +53,5 @@ ${UNTRUSTED_NOTE} Результати веб-пошуку теж це лише 
   serverTools: [WEB_SEARCH_TOOL],
   output: { kind: "markdown", saveAs: "search_report" },
   maxTokens: 6000,
-  temperature: 0.3,
   examples: ["Що нового про Web Push на iOS?", "Які браузери підтримують Background Sync?", "Порівняй Upstash Redis і Vercel KV для особистого проєкту"],
 };
