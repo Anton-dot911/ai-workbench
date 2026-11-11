@@ -38,6 +38,5 @@ ${UNTRUSTED_NOTE}
   finalTool: "submit_posts",
   output: { kind: "json", saveAs: "post" },
   maxTokens: 2500,
-  temperature: 0.8,
   examples: ["linkedin: чому я зберігаю дані локально в PWA", "telegram: підсумки тижня розробки", "x: одна думка про prompt caching"],
 };
