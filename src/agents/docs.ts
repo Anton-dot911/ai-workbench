@@ -41,7 +41,6 @@ ${UNTRUSTED_NOTE}`,
   tools: toolDefs("search_context", "read_artifact", "apply_edits", "save_artifact", "ask_user", "propose_memory"),
   output: { kind: "markdown", saveAs: "document" },
   maxTokens: 4000,
-  temperature: 0.5,
   examples: [
     "Скороти фрагмент до п'яти речень",
     "Перепиши у діловому стилі без канцеляризмів",
