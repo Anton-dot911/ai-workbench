@@ -49,7 +49,6 @@ export function buildRequest(agent: AgentManifest, ctx: ContextPacket, task: Tas
   return {
     model: MODEL_MAP[agent.model],
     max_tokens: agent.maxTokens,
-    ...(agent.temperature !== undefined ? { temperature: agent.temperature } : {}),
     system,
     ...(agent.tools.length || agent.serverTools?.length ? { tools: [...agent.tools, ...(agent.serverTools ?? [])] } : {}),
     // Агент зі структурованим виходом зобов'язаний викликати завершальний інструмент.
