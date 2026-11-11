@@ -19,7 +19,6 @@ export interface MessageRequest {
   system?: { type: "text"; text: string; cache_control?: { type: "ephemeral" } }[];
   messages: { role: "user" | "assistant"; content: unknown }[];
   tools?: unknown[];
-  temperature?: number;
   [k: string]: unknown;
 }
 
