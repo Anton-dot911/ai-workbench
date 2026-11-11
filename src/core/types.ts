@@ -38,7 +38,6 @@ export interface AgentManifest {
   finalTool?: string;
   output: { kind: "text" | "markdown" | "code" | "json" | "document"; schema?: JSONSchema; saveAs?: ArtifactType };
   maxTokens: number;
-  temperature?: number;
   examples: string[];
 }
 
