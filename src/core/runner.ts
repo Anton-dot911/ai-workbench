@@ -52,7 +52,7 @@ export function buildRequest(agent: AgentManifest, ctx: ContextPacket, task: Tas
     system,
     ...(agent.tools.length || agent.serverTools?.length ? { tools: [...agent.tools, ...(agent.serverTools ?? [])] } : {}),
     // Агент зі структурованим виходом зобов'язаний викликати завершальний інструмент.
-    ...(agent.finalTool ? { tool_choice: { type: "tool", name: agent.finalTool, disable_parallel_tool_use: true } } : {}),
+    ...(agent.finalTool ? { tool_choice: { type: "auto", disable_parallel_tool_use: true } } : {}),
     messages: [{ role: "user", content }],
   };
 }
@@ -145,6 +145,26 @@ export async function runAgent(agent: AgentManifest, task: Task, ui: RunUi): Pro
     }
 
     const calls = res.content.filter((b) => b.type === "tool_use");
+    const finalToolCalled = !agent.finalTool || calls.some((b) => b.name === agent.finalTool);
+
+    // Нові моделі Claude не підтримують примусовий tool_choice типу "tool".
+    // Для агентів зі структурованим виходом використовуємо "auto" і повторюємо
+    // запит, якщо модель завершила відповідь, не викликавши обов\u0027язковий інструмент.
+    if (agent.finalTool && !finalToolCalled && (res.stopReason !== "tool_use" || calls.length === 0)) {
+      messages.push({
+        role: "assistant",
+        content: res.content.filter((b) => b.type !== "text" || (b.text ?? "").length > 0),
+      });
+      messages.push({
+        role: "user",
+        content: `Потрібно завершити задачу викликом інструмента ${agent.finalTool}. Передай через нього результат відповідно до його схеми. Не завершуй звичайним текстом.`,
+      });
+      if (steps >= MAX_STEPS) {
+        throw new Error(`Модель не викликала обов\u0027язковий інструмент ${agent.finalTool} після ${MAX_STEPS} кроків.`);
+      }
+      continue;
+    }
+
     if (res.stopReason !== "tool_use" || calls.length === 0) break;
 
     // API не приймає порожніх текстових блоків у історії.
