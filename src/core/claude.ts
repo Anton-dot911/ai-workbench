@@ -124,6 +124,13 @@ export async function streamMessage(
           if (ev.delta?.type === "text_delta") {
             b.text = (b.text ?? "") + ev.delta.text;
             opts.onText?.(ev.delta.text);
+          } else if (ev.delta?.type === "thinking_delta") {
+            // Claude може повертати thinking як порожній блок + signature_delta (display: omitted),
+            // або передавати текст частинами. Зберігаємо обидва варіанти без змін.
+            b.thinking = (b.thinking ?? "") + (ev.delta.thinking ?? "");
+          } else if (ev.delta?.type === "signature_delta") {
+            // Підпис є обов’язковим для round-trip thinking-блоку; без нього наступний запит зламається.
+            b.signature = (b.signature ?? "") + (ev.delta.signature ?? "");
           } else if (ev.delta?.type === "input_json_delta") {
             jsonBufs.set(ev.index, (jsonBufs.get(ev.index) ?? "") + ev.delta.partial_json);
           } else if (ev.delta?.type === "citations_delta") {
