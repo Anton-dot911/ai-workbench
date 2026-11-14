@@ -47,6 +47,8 @@ export interface Task {
   input: string;
   selection?: string;
   upstream?: string;
+  /** `web`: upstream походить із кроку, що читав інтернет (прямо чи через ланцюг): передається як <untrusted_content>. */
+  upstreamOrigin?: "web";
   sessionId?: string;
   chainId?: string;
   mode?: string;

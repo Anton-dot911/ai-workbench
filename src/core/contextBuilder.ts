@@ -12,7 +12,11 @@ export const neutralize = (s: string): string => s.replace(CLOSERS, "<\\/$1");
 
 /** Звіти веб-пошуку містять переказ зовнішніх сторінок: передаються моделі як недовірені дані. */
 export const untrusted = (kind: string, text: string): string =>
-  kind === "search_report" ? `<untrusted_content source="web-search-report">\n${text}\n</untrusted_content>` : text;
+  kind === "search_report"
+    ? `<untrusted_content source="web-search-report">\n${text}\n</untrusted_content>`
+    : kind === "web_derived"
+      ? `<untrusted_content source="web-derived">\n${text}\n</untrusted_content>`
+      : text;
 
 export function xml(tag: string, text: string): string {
   return `<${tag}>\n${neutralize(text)}\n</${tag}>`;
@@ -218,7 +222,8 @@ export async function collectParts(agent: AgentManifest, task: Task): Promise<Pa
           detail: "передано напряму",
           open: "<upstream>",
           close: "</upstream>",
-          items: [neutralize(task.upstream)],
+          // Спершу нейтралізуємо закриваючі теги в даних, потім ставимо власну обгортку (інакше вона б зламалась).
+          items: [task.upstreamOrigin === "web" ? untrusted("web_derived", neutralize(task.upstream)) : neutralize(task.upstream)],
           defaultOn: true,
         });
         break;
