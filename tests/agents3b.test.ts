@@ -97,14 +97,15 @@ test("reviewToEdits бере лише зауваження з готовою з�
 });
 
 // ---------- маніфести й реєстр ----------
-test("маніфести: унікальні команди, завершальний інструмент є серед інструментів, запит примушує його", async () => {
+test("маніфести: унікальні команди, завершальний інструмент є серед інструментів, запит із tool_choice auto", async () => {
   const cmds = AGENTS.flatMap((a) => a.commands);
   assert.equal(new Set(cmds).size, cmds.length);
   for (const a of [reviewAgent, postsAgent]) {
     assert.ok(a.finalTool && a.tools.some((t) => t.name === a.finalTool));
     const { packet } = await resolveContext(a, { input: "x" });
     const req = buildRequest(a, packet, { input: "x" }) as any;
-    assert.deepEqual(req.tool_choice, { type: "tool", name: a.finalTool, disable_parallel_tool_use: true });
+    // Актуальні моделі Claude не підтримують tool_choice типу tool/any: обов'язковість перевіряє runAgent (інваріант 19).
+    assert.deepEqual(req.tool_choice, { type: "auto", disable_parallel_tool_use: true });
   }
   assert.equal(parseCommand("/перевір language")!.agent.id, "review");
   assert.equal(parseCommand("/пост linkedin: тема")!.rest, "linkedin: тема");
@@ -138,7 +139,8 @@ test("Перевірка: завершальний інструмент закі
   mock([toolTurn("submit_review", { verdict: "needs_changes", score: 7, summary: "Калька", issues: [issue({ replacement: "у межах" })] })]);
   const { run, text, stopReason } = await runAgent(reviewAgent, { input: "language", selection: "Текст у рамках проєкту." }, { token: "t" });
   assert.equal(bodies.length, 1, "після завершального інструмента нового запиту немає");
-  assert.equal(bodies[0].tool_choice.name, "submit_review");
+  assert.deepEqual(bodies[0].tool_choice, { type: "auto", disable_parallel_tool_use: true });
+  assert.ok(bodies[0].tools.some((t: any) => t.name === "submit_review"), "завершальний інструмент оголошено в запиті");
   assert.equal(run.steps, 1);
   assert.equal(stopReason, "end_turn");
   const r = parseReview(text)!;

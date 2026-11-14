@@ -219,7 +219,7 @@ const check = (name, cond, extra = "") => { console.log((cond ? "PASS" : "FAIL")
   ] } };
   setVal(taskInput(), "/перевір language"); await sleep(60); q(".go").click(); await sleep(900);
   check("агент перемкнувся на «Перевірку» командою", q(".agentbtn h1").textContent === "Перевірка");
-  check("запит примушує завершальний інструмент", posts.at(-1).tool_choice?.name === "submit_review" && posts.at(-1).tools.length === 1, JSON.stringify(posts.at(-1).tool_choice));
+  check("запит має tool_choice auto і лише завершальний інструмент (обов'язковість перевіряє runAgent)", posts.at(-1).tool_choice?.type === "auto" && posts.at(-1).tools.length === 1 && posts.at(-1).tools[0].name === "submit_review" && !("temperature" in posts.at(-1)), JSON.stringify(posts.at(-1).tool_choice));
   check("картка перевірки: вердикт, оцінка, зауваження", /Потрібні правки/.test(lastCard().textContent) && /оцінка 6 \/ 10/.test(lastCard().textContent) && qa(".iss").length >= 2);
   check("серйозніше зауваження першим", qa(".iss")[0].classList.contains("medium"));
   const fixBtn = inCard("Застосувати виправлення (1)");

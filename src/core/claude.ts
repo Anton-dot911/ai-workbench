@@ -113,6 +113,9 @@ export async function streamMessage(
           break;
         case "content_block_start": {
           const cb: ContentBlock = { ...ev.content_block, ...(ev.content_block?.type === "text" ? { text: "" } : {}) };
+          // Thinking-блок у історії завжди має мати рядок thinking (навіть порожній, якщо його приховано);
+          // без поля API відхиляє наступний запит. Підпис не синтезується: він приходить лише через signature_delta.
+          if (cb.type === "thinking" && typeof cb.thinking !== "string") cb.thinking = "";
           if (cb.type === "text" && !Array.isArray(cb.citations)) delete cb.citations;
           blocks[ev.index] = cb;
           opts.onBlock?.(cb, "start");
