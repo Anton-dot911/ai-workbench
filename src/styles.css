@@ -285,3 +285,16 @@ textarea.field { resize: vertical; line-height: 1.4; }
 .srcs li a { color: var(--brand); }
 @media (prefers-color-scheme: dark) { .srcs li a { color: #8fb0e8; } }
 .srcs li .dt { display: block; }
+
+/* Ланцюг агентів (етап 4) */
+.chain { padding: 14px; }
+.chead { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.chead .note { margin: 0; }
+.csteps { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.cs { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 99px; background: var(--raised); border: 1px solid var(--line); font-size: 14px; color: var(--ink2); }
+.cs .mk { font-size: 12px; }
+.cs.run { border-color: var(--brand); color: var(--ink); }
+.cs.done { color: var(--ok); }
+.cs.error { color: var(--bad); }
+.cstat.stopped_cost, .cstat.error { color: var(--bad); }
+.cstat.done { color: var(--ok); }

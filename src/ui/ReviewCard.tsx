@@ -6,7 +6,7 @@ const CAT: Record<ReviewIssue["category"], string> = { language: "мова", fac
 const ORDER: Record<ReviewIssue["severity"], number> = { high: 0, medium: 1, low: 2 };
 
 /** Результат «Перевірки»: вердикт, оцінка, зауваження; зауваження з готовою заміною можна застосувати з diff. */
-export function ReviewCard({ data, onApply }: { data: ReviewOutput; onApply: (issues: ReviewIssue[]) => void }) {
+export function ReviewCard({ data, onApply }: { data: ReviewOutput; onApply?: (issues: ReviewIssue[]) => void }) {
   const issues = [...data.issues].sort((a, b) => ORDER[a.severity] - ORDER[b.severity]);
   const fixable = issues.filter((i) => i.replacement !== undefined);
   return (
@@ -32,7 +32,7 @@ export function ReviewCard({ data, onApply }: { data: ReviewOutput; onApply: (is
           {i.source && <p className="meta">Джерело: {i.source}</p>}
         </div>
       ))}
-      {fixable.length > 0 && (
+      {onApply && fixable.length > 0 && (
         <div className="acts nopad">
           <button className="btn primary" onClick={() => onApply(fixable)}>
             <Icon name="check" size={18} />
@@ -40,7 +40,7 @@ export function ReviewCard({ data, onApply }: { data: ReviewOutput; onApply: (is
           </button>
         </div>
       )}
-      {fixable.length > 0 && <p className="note">Зміни застосовуються до тексту у «Фрагменті». Перед цим ви побачите diff.</p>}
+      {onApply && fixable.length > 0 && <p className="note">Зміни застосовуються до тексту у «Фрагменті». Перед цим ви побачите diff.</p>}
     </div>
   );
 }
