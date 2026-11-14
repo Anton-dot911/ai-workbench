@@ -12,7 +12,7 @@ export interface PostCardProps {
   onReview: (variant: number) => void;
   onCopy: (variant: number) => void;
   onReuse: (variant: number) => void;
-  onAgain: () => void;
+  onAgain?: () => void;
 }
 
 /** Варіанти поста з лінійкою довжини. Підрахунок і правила платформи рахує код (checkVariant), а не модель. */
@@ -80,9 +80,11 @@ export function PostCard({ data, saved, onSave, onReview, onCopy, onReuse, onAga
         <button className="btn sq" aria-label="Використати як фрагмент" onClick={() => onReuse(idx)}>
           <Icon name="reuse" size={18} />
         </button>
-        <button className="btn sq" aria-label="Згенерувати знову" onClick={onAgain}>
-          <Icon name="again" size={18} />
-        </button>
+        {onAgain && (
+          <button className="btn sq" aria-label="Згенерувати знову" onClick={onAgain}>
+            <Icon name="again" size={18} />
+          </button>
+        )}
       </div>
     </div>
   );

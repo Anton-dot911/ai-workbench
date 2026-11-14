@@ -3,12 +3,13 @@ import { ApiError } from "./claude";
 import type { Source } from "./citations";
 import { resolveContext } from "./contextBuilder";
 import { worstCaseRunUsd } from "./estimate";
+import { CHAIN_LIMIT_DEFAULT_USD } from "./settings";
 import { runAgent, type RunUi } from "./runner";
 import type { AgentManifest, Run, Task } from "./types";
 
 /** Запобіжники ланцюга (етап 4): без них агенти можуть безкінечно «покращувати» текст і витрачати бюджет. */
 export const MAX_CHAIN_STEPS = 6;
-export const DEFAULT_CHAIN_LIMIT_USD = 0.25;
+export const DEFAULT_CHAIN_LIMIT_USD = CHAIN_LIMIT_DEFAULT_USD;
 
 export interface StepResult {
   index: number;
@@ -17,6 +18,7 @@ export interface StepResult {
   run: Run;
   text: string;
   sources: Source[];
+  stopReason: string | null;
 }
 
 export interface ChainStep {
@@ -117,7 +119,7 @@ export async function runChain(steps: ChainStep[], ui: ChainUi, opts: ChainOptio
       throw e;
     }
     spent += res.run.usage.costUsd;
-    const result: StepResult = { index: i, agentId: agent.id, instruction: step.instruction, run: res.run, text: res.text, sources: res.sources };
+    const result: StepResult = { index: i, agentId: agent.id, instruction: step.instruction, run: res.run, text: res.text, sources: res.sources, stopReason: res.stopReason };
     done.push(result);
     ui.onStepDone?.(i, result);
 

@@ -292,6 +292,89 @@ const check = (name, cond, extra = "") => { console.log((cond ? "PASS" : "FAIL")
   setVal(taskInput(), "/док ще раз"); await sleep(60); q(".go").click(); await sleep(900);
   check("повторна пропозиція відхиленого блокується (tool_result з помилкою)", /відхилив/.test(JSON.stringify(posts.at(-1).messages.at(-1).content)));
 
+  // Етап 4: рецепт «Пост з дослідженням» (Пошук → Пости → Перевірка), ліміт вартості ланцюга
+  await tab("Робота");
+  const waitFor = async (fn, ms = 4000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (fn()) return true; await sleep(50); } return false; };
+  const chains = () => qa("section.chain");
+  const chainSeq = () => [
+    searchStep,
+    answerStep,
+    () => toolTurn({ name: "submit_posts", input: { platform: "x", variants: [
+      { text: "Web Push на iOS працює лише для PWA з початкового екрана.", hashtags: ["PWA", "iOS"] },
+      { text: "iOS 16.4+: Web Push тільки для встановлених PWA.", hashtags: ["PWA"] },
+    ] } }),
+    () => toolTurn({ name: "submit_review", input: { verdict: "ok", score: 9, summary: "Факти збігаються зі звітом пошуку", issues: [] } }),
+  ];
+  const runChainCmd = async (text) => { setVal(taskInput(), text); await sleep(60); q(".go").click(); };
+
+  const c0 = chains().length;
+  await runChainCmd("/пост-з-пошуком X:"); await sleep(150);
+  check("рецепт без теми: підказка, ланцюг не стартував", /Вкажіть тему/.test(q(".toast")?.textContent ?? "") && chains().length === c0);
+  setVal(taskInput(), "/пост-з-пошуком"); await sleep(40); q(".go").click(); await sleep(150);
+  check("рецепт без аргументів: підказка з прикладом і заготовка команди", /Пост з дослідженням/.test(q(".toast").textContent) && taskInput().value === "/пост-з-пошуком ");
+  setVal(taskInput(), ""); await sleep(30);
+
+  const before4 = posts.length;
+  seq = chainSeq();
+  await runChainCmd("/пост-з-пошуком X: Background Sync у Safari");
+  const finished = await waitFor(() => chains().length === c0 + 1 && /Готово/.test(chains().at(-1).textContent) && !q(".go.stop"), 8000);
+  check("ланцюг завершився: смужка зі станом «Готово»", finished, chains().at(-1)?.textContent);
+  const bar = chains().at(-1);
+  const stepEls = [...bar.querySelectorAll(".csteps .cs")];
+  check("смужка: Пошук, Пости, Перевірка, усі виконані", stepEls.map((e) => e.textContent.replace(/[✓●○■✕]/g, "")).join("|") === "Пошук|Пости|Перевірка" && stepEls.every((e) => e.classList.contains("done")), stepEls.map((e) => e.className + ":" + e.textContent).join(" | "));
+  check("витрати ланцюга проти ліміту й лінійка", /(<\$0,01|\$0,\d\d) з \$0,25/.test(bar.textContent) && !!bar.querySelector(".gauge"), bar.textContent);
+  check("чотири запити: пошук (з паузою), пости, перевірка", posts.length === before4 + 4, String(posts.length - before4));
+  const uptext = (b) => b.messages[0].content.map((x) => x.text).join("\n");
+  check("пошук запитує веб-пошук і не отримує upstream", !!posts[before4].tools.find((t) => t.type === "web_search_20250305") && !/<upstream>/.test(uptext(posts[before4])));
+  check("«Пости» отримали звіт пошуку як недовірений вміст, платформа X", /<upstream>\s*<untrusted_content source="web-derived">[\s\S]*Web Push працює на iOS 16\.4\+/.test(uptext(posts[before4 + 2])) && /^<task>\nx: Background Sync у Safari/.test(posts[before4 + 2].messages[0].content.at(-1).text));
+  check("«Перевірка» отримала пост і звіт, режими facts, language", /Текст для перевірки \(пост для x\)/.test(uptext(posts[before4 + 3])) && /Джерело тверджень/.test(uptext(posts[before4 + 3])) && /facts, language/.test(posts[before4 + 3].messages[0].content.at(-1).text));
+  check("усі запити без temperature, а tool_choice лише auto", posts.slice(before4).every((b) => !("temperature" in b) && (!b.tool_choice || b.tool_choice.type === "auto")));
+  const labels = qa("section[aria-label=\"Робота\"] p.note").map((e) => e.textContent);
+  check("кроки підписані «Крок i з 3»", labels.some((t) => /Крок 1 з 3 · Пошук/.test(t)) && labels.some((t) => /Крок 2 з 3 · Пости/.test(t)) && labels.some((t) => /Крок 3 з 3 · Перевірка/.test(t)), labels.filter((t) => /Крок/.test(t)).join(" | "));
+  const stepCards = feedCards().slice(-3);
+  check("крок 1: звіт із джерелами й кнопками збереження", stepCards[0].querySelectorAll(".srcs a").length === 2 && /Web Push працює на iOS 16\.4\+ \[1\]/.test(stepCards[0].querySelector(".ptext").textContent) && !![...stepCards[0].querySelectorAll("button")].find((b) => b.textContent.includes("Зберегти")));
+  check("крок 2: два варіанти з лінійкою на 280 символів", stepCards[1].querySelectorAll(".vt button").length === 2 && /\/ 280 симв\./.test(stepCards[1].textContent));
+  check("крок 2: немає кнопки «Згенерувати знову» (без звіту вона дала б інший результат)", !stepCards[1].querySelector("[aria-label=\"Згенерувати знову\"]"));
+  check("крок 3: картка перевірки без кнопки виправлень", /Зауважень немає/.test(stepCards[2].textContent) && !/Застосувати виправлення/.test(stepCards[2].textContent));
+  [...stepCards[0].querySelectorAll("button")].find((b) => b.textContent.includes("Зберегти")).click(); await sleep(300);
+  await tab("Бібліотека");
+  check("звіт ланцюга збережено як «Пошук: тема» без префікса платформи", qa(".itemhead .nm").some((e) => /^Пошук: Background Sync у Safari/.test(e.textContent.trim())), qa(".itemhead .nm").map((e) => e.textContent).join(" | "));
+
+  // Ліміт вартості ланцюга: налаштування, підтвердження, зупинка
+  await tab("Параметри");
+  const lim = () => q("#chain-limit");
+  check("параметри: ліміт ланцюга за замовчуванням $0,25", lim().value === "0,25");
+  setVal(lim(), "0,01"); lim().focus(); lim().blur(); await sleep(120);
+  check("ліміт збережено на пристрої", w.localStorage.getItem("wb.chainLimit") === "0.01" && /Ліміт ланцюга/.test(q(".toast").textContent), w.localStorage.getItem("wb.chainLimit"));
+  await tab("Робота");
+  const before4b = posts.length;
+  await runChainCmd("/пост-з-пошуком X: Ще одна тема");
+  const gated = await waitFor(() => /Ліміт вартості ланцюга/.test(q(".sheet.on")?.textContent ?? ""));
+  check("оцінка кроку перевищує ліміт: шторка з витратами й назвою кроку", gated && /Наступний крок «Пошук»/.test(q(".sheet.on").textContent) && /з \$0,01/.test(q(".sheet.on").textContent), q(".sheet.on")?.textContent);
+  check("до підтвердження запитів немає", posts.length === before4b);
+  byText(".sheet.on button", "Зупинити").click();
+  const stopped = await waitFor(() => /Зупинено: перевищено ліміт вартості/.test(chains().at(-1)?.textContent ?? "") && !q(".go.stop"));
+  check("відмова зупиняє ланцюг без запитів", stopped && posts.length === before4b, chains().at(-1)?.textContent);
+
+  seq = chainSeq();
+  await runChainCmd("/пост-з-пошуком X: Ще одна тема");
+  const gateTexts = [];
+  for (let n = 0; n < 3; n++) {
+    const ok = await waitFor(() => !!q(".sheet.on button.primary"));
+    if (!ok) break;
+    gateTexts.push(q(".sheet.on").textContent);
+    byText(".sheet.on button", "Продовжити").click();
+    await sleep(150);
+  }
+  const done2 = await waitFor(() => /Готово/.test(chains().at(-1)?.textContent ?? "") && !q(".go.stop"), 8000);
+  check("підтвердження кожного кроку: три шторки, ланцюг доведено до кінця", gateTexts.length === 3 && done2, gateTexts.length + " шторок");
+  check("друга шторка враховує вже витрачене", /Витрачено (<\$0,01|\$0,\d\d) з \$0,01/.test(gateTexts[1] ?? "") && /«Пости»/.test(gateTexts[1] ?? ""), gateTexts[1]);
+  setVal(lim(), ""); await tab("Параметри");
+  setVal(lim(), "0,25"); lim().focus(); lim().blur(); await sleep(100);
+  check("ліміт повернуто до $0,25", w.localStorage.getItem("wb.chainLimit") === "0.25");
+  await tab("Робота");
+  setVal(taskInput(), ""); await sleep(30);
+
   // Імпорт бази: Пам'ять → імпорт пакета
   await tab("Параметри");
   check("параметри показують режим і адресу", /вкладка браузера · app\.test/.test(q("section[aria-label=Налаштування]").textContent), q("section[aria-label=Налаштування]").textContent.match(/Зараз:[^\n]*/)?.[0]);

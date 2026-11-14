@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { StatusResponse } from "../core/claude";
 import { backupMeta, isAutoBackup, lastBackupLocal, pushBackup, restoreBackup, setAutoBackup, type BackupMeta } from "../db/backup";
-import { MODEL_MAP } from "../core/settings";
+import { CHAIN_LIMIT_DEFAULT_USD, getChainLimit, MODEL_MAP, setChainLimit } from "../core/settings";
 import { exportAll } from "../db/db";
 import { dataCounts, selfTest, type DataCounts, type SelfTest, type StorageHealth } from "../db/health";
 import { ImportSheet } from "../ui/ImportSheet";
@@ -23,6 +23,7 @@ export function SettingsScreen({ token, health, status, statusError, onRefresh, 
   const [persisted, setPersisted] = useState<boolean | null>(null);
   const [usage, setUsage] = useState<{ used: number; quota: number } | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [chainLimit, setChainLimitText] = useState(String(getChainLimit()).replace(".", ","));
   const [meta, setMeta] = useState<BackupMeta | null | undefined>(undefined);
   const [metaError, setMetaError] = useState("");
   const [auto, setAuto] = useState(isAutoBackup());
@@ -141,6 +142,33 @@ export function SettingsScreen({ token, health, status, statusError, onRefresh, 
         ) : (
           <p className="note">{statusError || "Завантаження…"}</p>
         )}
+        <label className="sumtop gap" htmlFor="chain-limit">
+          <span className="nm">Ліміт одного ланцюга, $</span>
+        </label>
+        <input
+          id="chain-limit"
+          className="field"
+          type="text"
+          inputMode="decimal"
+          autoComplete="off"
+          value={chainLimit}
+          onChange={(e) => setChainLimitText(e.target.value)}
+          onBlur={() => {
+            const v = Number(chainLimit.replace(",", "."));
+            if (!Number.isFinite(v) || v <= 0) {
+              setChainLimit(0);
+              setChainLimitText(String(CHAIN_LIMIT_DEFAULT_USD).replace(".", ","));
+              toast("Некоректний ліміт: повернуто типовий");
+              return;
+            }
+            setChainLimit(v);
+            toast(`Ліміт ланцюга: ${money(v)}`);
+          }}
+          aria-label="Ліміт вартості ланцюга, $"
+        />
+        <p className="note">
+          Сума всіх кроків ланцюга (наприклад, «Пост з дослідженням»). Перед кожним кроком застосунок оцінює найгірший випадок і, якщо ліміт буде перевищено, питає, чи продовжувати. Типово {money(CHAIN_LIMIT_DEFAULT_USD)}.
+        </p>
         <button className="btn" onClick={onRefresh}>
           Оновити
         </button>
