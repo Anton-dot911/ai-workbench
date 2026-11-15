@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { parseRecipeCommand } from "./agents/recipes";
 import { getAgent } from "./agents/registry";
 import { ApiError, getStatus, type StatusResponse } from "./core/claude";
 import { resolveContext, type Resolved } from "./core/contextBuilder";
@@ -206,6 +207,16 @@ export default function App() {
         open={agentOpen}
         current={agent.id}
         onClose={() => setAgentOpen(false)}
+        onPickRecipe={(r) => {
+          // Команду підставляємо перед уже набраним текстом (платформа й тема лишаються), слеш не потрібен на клавіатурі.
+          setSession((s) => {
+            const rest = (parseRecipeCommand(s.task)?.rest ?? s.task.replace(/^\/\S+\s*/, "")).trim();
+            return { task: `${r.commands[0]} ${rest}` };
+          });
+          setAgentOpen(false);
+          toast(`${r.name}: допишіть платформу й тему, наприклад ${r.examples[0]}`);
+          (document.querySelector(".inrow input[type=text]") as HTMLInputElement | null)?.focus();
+        }}
         onPick={(id) => {
           setSession({ agentId: id });
           setAgentOpen(false);

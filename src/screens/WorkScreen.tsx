@@ -118,17 +118,18 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
     if (!text || busy) return;
 
     let ag = getAgent(s.agentId);
-    if (text.startsWith("/")) {
-      const rc = parseRecipeCommand(text);
-      if (rc) {
-        if (!rc.rest) {
-          setSession({ task: `${rc.recipe.commands[0]} ` });
-          toast(`${rc.recipe.name}: ${rc.recipe.commands[0]} ${rc.recipe.examples[0]}`);
-          return;
-        }
-        await sendChain(rc.recipe, rc.rest, text);
+    // Рецепт розпізнається і без слеша (див. parseRecipeCommand).
+    const rc = parseRecipeCommand(text);
+    if (rc) {
+      if (!rc.rest) {
+        setSession({ task: `${rc.recipe.commands[0]} ` });
+        toast(`${rc.recipe.name}: ${rc.recipe.commands[0]} ${rc.recipe.examples[0]}`);
         return;
       }
+      await sendChain(rc.recipe, rc.rest, text);
+      return;
+    }
+    if (text.startsWith("/")) {
       const cmd = parseCommand(text);
       if (!cmd) {
         toast(`Невідома команда. Доступні: ${[...AGENTS.flatMap((a) => a.commands.slice(0, 1)), ...RECIPES.map((r) => r.commands[0])].join(", ")}`);

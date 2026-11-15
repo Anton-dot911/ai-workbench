@@ -84,11 +84,16 @@ export const RECIPES: Recipe[] = [postWithResearch];
 
 export const getRecipe = (id: string): Recipe | undefined => RECIPES.find((r) => r.id === id);
 
-/** Розбирає slash-команду рецепта на початку задачі: «/пост-з-пошуком linkedin: тема». */
+/**
+ * Розбирає команду рецепта на початку задачі: «/пост-з-пошуком linkedin: тема».
+ * Слеш необов'язковий: на українській розкладці iPhone «/» лежить на цифровій сторінці, а автоверхній регістр
+ * робить із першого слова «Пост-з-пошуком». Назви рецептів із дефісами, тож не плутаються зі звичайним текстом задачі
+ * (на відміну від коротких команд агентів на кшталт «пост» чи «код», які лишаються лише зі слешем).
+ */
 export function parseRecipeCommand(input: string): { recipe: Recipe; rest: string } | null {
-  const m = input.trim().match(/^(\/\S+)\s*([\s\S]*)$/);
+  const m = input.trim().match(/^(\S+)\s*([\s\S]*)$/);
   if (!m) return null;
-  const cmd = m[1].toLowerCase();
-  const recipe = RECIPES.find((r) => r.commands.includes(cmd));
+  const name = m[1].toLowerCase().replace(/^\//, "");
+  const recipe = RECIPES.find((r) => r.commands.some((c) => c.replace(/^\//, "") === name));
   return recipe ? { recipe, rest: m[2].trim() } : null;
 }

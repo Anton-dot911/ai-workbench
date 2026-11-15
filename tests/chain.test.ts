@@ -409,3 +409,19 @@ test("retry: pauseAfter питає один раз, а не на кожному 
   assert.equal(res.status, "done");
   assert.equal(asked, 1);
 });
+
+test("команда рецепта: слеш необов'язковий, регістр не важливий; звичайний текст і команди агентів не плутаються", () => {
+  for (const cmd of ["/пост-з-пошуком", "пост-з-пошуком", "Пост-з-пошуком", "/POST-RESEARCH", "post-research"]) {
+    const rc = parseRecipeCommand(`${cmd} x: тема`);
+    assert.equal(rc?.recipe.id, "post-research", cmd);
+    assert.equal(rc?.rest, "x: тема", cmd);
+  }
+  assert.equal(parseRecipeCommand("Пост-з-пошуком")?.rest, "", "лише команда: порожній залишок");
+  assert.equal(parseRecipeCommand("  пост-з-пошуком   linkedin:  тема ")?.rest, "linkedin:  тема");
+  // Не рецепт: звичайна задача, команда агента, схоже слово, рецепт не першим словом.
+  assert.equal(parseRecipeCommand("пост про Web Push"), null);
+  assert.equal(parseRecipeCommand("/пост linkedin: тема"), null);
+  assert.equal(parseRecipeCommand("пост-з-пошуком-2 тема"), null);
+  assert.equal(parseRecipeCommand("зроби пост-з-пошуком x: тема"), null);
+  assert.equal(parseRecipeCommand("   "), null);
+});
