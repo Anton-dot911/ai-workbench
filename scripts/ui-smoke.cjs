@@ -340,6 +340,21 @@ const check = (name, cond, extra = "") => { console.log((cond ? "PASS" : "FAIL")
   await tab("Бібліотека");
   check("звіт ланцюга збережено як «Пошук: тема» без префікса платформи", qa(".itemhead .nm").some((e) => /^Пошук: Background Sync у Safari/.test(e.textContent.trim())), qa(".itemhead .nm").map((e) => e.textContent).join(" | "));
 
+  // Журнал запусків: ланцюг одним записом, кроки всередині, читабельний вихід
+  byText(".seg button", "Журнал запусків").click(); await sleep(150);
+  const chainItem = () => qa(".item.chain")[0];
+  check("журнал: ланцюг одним записом із назвою рецепта й темою", !!chainItem() && /^Пост з дослідженням · X: Background Sync у Safari/.test(chainItem().querySelector(".nm").textContent.trim()), chainItem()?.querySelector(".nm")?.textContent);
+  check("журнал: підпис показує агентів і суму витрат ланцюга", /Пошук → Пости → Перевірка/.test(chainItem().querySelector(".dt").textContent) && /(<\$0,01|\$0,\d\d)/.test(chainItem().querySelector(".tkn").textContent), chainItem()?.textContent);
+  check("журнал: кроки згорнуті, поки ланцюг не відкрито", qa(".item.nested").length === 0);
+  chainItem().querySelector(".itemhead").click(); await sleep(120);
+  const nestedNames = qa(".item.nested .itemhead .nm").map((e) => e.textContent.trim());
+  check("журнал: три кроки з номерами", nestedNames.join(" | ") === "Крок 1 з 3 · Пошук | Крок 2 з 3 · Пости | Крок 3 з 3 · Перевірка", nestedNames.join(" | "));
+  qa(".item.nested .itemhead")[1].click(); await sleep(120);
+  const pv = q(".item.nested .pv");
+  check("журнал: пости читабельно (варіанти, хештеги, довжина), а не сирий JSON", !!pv && /Web Push на iOS працює лише для PWA/.test(pv.textContent) && /#PWA/.test(pv.textContent) && /\/ 280 симв\./.test(pv.textContent) && !/"platform"|"variants"/.test(q(".item.nested").parentElement.textContent), pv?.textContent.slice(0, 120));
+  qa(".item.nested .itemhead")[2].click(); await sleep(120);
+  check("журнал: перевірка читабельно (картка вердикту, без кнопки виправлень)", !!q(".item.nested .rv") && /Зауважень немає/.test(q(".item.nested .rv").textContent) && !/Застосувати виправлення/.test(q(".item.nested").parentElement.textContent) && !/"verdict"/.test(q(".item.nested").parentElement.textContent));
+
   // Ліміт вартості ланцюга: налаштування, підтвердження, зупинка
   await tab("Параметри");
   const lim = () => q("#chain-limit");
