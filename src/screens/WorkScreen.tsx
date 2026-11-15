@@ -58,7 +58,7 @@ interface FeedItem {
   kind?: "chain";
   chain?: ChainView;
   /** Крок ланцюга: у картці замість задачі показується «Крок i з n». */
-  chainStep?: { index: number; total: number };
+  chainStep?: { index: number; total: number; label?: string };
   /** Тема ланцюга: назва збереженого артефакту й контекст «Перевірки» замість службової інструкції кроку. */
   topic?: string;
 }
@@ -247,11 +247,12 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
             })),
           confirm: (req) => new Promise<ConfirmDecision>((resolve) => setPending({ kind: "confirm", req, resolve })),
           ask: (req) => new Promise<string>((resolve) => setPending({ kind: "ask", req, resolve })),
-          onStepStart: (i, step, ag) => {
+          onStepStart: (i, step, ag, meta) => {
             cur = crypto.randomUUID();
             const id = cur;
-            setFeed((f) => [...f, { id, agentId: ag.id, agentName: ag.name, task: step.instruction, topic: splitPlatform(input).topic, output: "", status: "running", tools: [], chainStep: { index: i, total: steps.length } }]);
-            setStepState(i, "run");
+            setFeed((f) => [...f, { id, agentId: ag.id, agentName: ag.name, task: step.instruction, topic: splitPlatform(input).topic, output: "", status: "running", tools: [], chainStep: { index: i, total: steps.length, ...(meta.label ? { label: meta.label } : {}) } }]);
+            // Доопрацювання (виправлення, повтор) додає кроки за межами плану: смужка росте.
+            setChain((c) => ({ ...c, steps: i < c.steps.length ? c.steps.map((s, n) => (n === i ? { ...s, state: "run" } : s)) : [...c.steps, { agentId: ag.id, name: ag.name + (meta.label ? ` (${meta.label})` : ""), state: "run" }] }));
           },
           onStepDone: (i, r) => {
             spent += r.run.usage.costUsd;
@@ -380,7 +381,9 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
           <div key={it.id}>
             {it.chainStep ? (
               <p className="note">
-                Крок {it.chainStep.index + 1} з {it.chainStep.total} · {it.agentName}
+                Крок {it.chainStep.index + 1}
+                {it.chainStep.index < it.chainStep.total ? ` з ${it.chainStep.total}` : ""} · {it.agentName}
+                {it.chainStep.label ? ` (${it.chainStep.label})` : ""}
               </p>
             ) : (
               <>

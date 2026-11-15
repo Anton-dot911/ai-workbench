@@ -80,3 +80,15 @@ test("підпис кроку з номером і загальною кільк
 test("порожній журнал дає порожній список", () => {
   assert.deepEqual(groupRuns([], nameOf), []);
 });
+
+test("кроки доопрацювання за межами плану: «Крок 4 · Пости (виправлення)» без «з N», у групі в порядку виконання", () => {
+  const mk = (a: string, index: number, label?: string) => run(a, 5000, { chainId: "c", chain: { recipe: "Пост з дослідженням", topic: "x: тема", index, total: 3, ...(label ? { label } : {}) } });
+  const runs = [mk("review", 4, "повтор"), mk("posts", 3, "виправлення"), mk("review", 2), mk("posts", 1), mk("search", 0)];
+  const g = groupRuns(runs, nameOf)[0];
+  assert.ok(g.kind === "chain");
+  if (g.kind !== "chain") return;
+  assert.deepEqual(g.runs.map((r, k) => stepLabel(r, k, nameOf)), [
+    "Крок 1 з 3 · Пошук", "Крок 2 з 3 · Пости", "Крок 3 з 3 · Перевірка", "Крок 4 · Пости (виправлення)", "Крок 5 · Перевірка (повтор)",
+  ]);
+  assert.equal(g.runs.length, 5);
+});
