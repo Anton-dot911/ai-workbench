@@ -423,6 +423,31 @@ const check = (name, cond, extra = "") => { console.log((cond ? "PASS" : "FAIL")
   await tab("Робота");
   setVal(taskInput(), ""); await sleep(30);
 
+  // Запуск рецепта без слеша й вибір рецепта у шторці агентів (T4.2d)
+  const cS = chains().length;
+  const beforeS = posts.length;
+  seq = chainSeq();
+  await runChainCmd("Пост-з-пошуком X: Тема без слеша");
+  const doneS = await waitFor(() => chains().length === cS + 1 && /Готово/.test(chains().at(-1).textContent) && !q(".go.stop"), 8000);
+  check("рецепт запускається без слеша (з автоверхнім регістром iOS)", doneS && posts.length === beforeS + 4 && /Тема без слеша/.test(chains().at(-1).textContent), chains().at(-1)?.textContent);
+  check("перший запит ланцюга без слеша це «Пошук» (веб-пошук), а не звичайний запуск «Постів»", !!posts[beforeS].tools.find((t) => t.type === "web_search_20250305"));
+
+  q(".agentbtn").click(); await sleep(100);
+  const sheetS = q(".sheet.on");
+  check("шторка агентів: розділ «Рецепти» з назвою, описом і командою", !!sheetS && /Рецепти/.test(sheetS.textContent) && /Пост з дослідженням/.test(sheetS.textContent) && /\/пост-з-пошуком/.test(sheetS.textContent) && /ланцюг/.test(sheetS.textContent), sheetS?.textContent.slice(-300));
+  setVal(taskInput(), ""); await sleep(30);
+  byText(".sheet.on .agent", "Пост з дослідженням").click(); await sleep(150);
+  check("вибір рецепта: шторка закрита, команда підставлена в поле, підказка з прикладом", !q(".sheet.on") && taskInput().value === "/пост-з-пошуком " && /Пост з дослідженням: допишіть платформу й тему/.test(q(".toast").textContent), taskInput().value + " | " + q(".toast")?.textContent);
+  seq = chainSeq();
+  setVal(taskInput(), taskInput().value + "X: Тема з шторки"); await sleep(60); q(".go").click();
+  const doneP = await waitFor(() => chains().length === cS + 2 && /Готово/.test(chains().at(-1).textContent) && !q(".go.stop"), 8000);
+  check("рецепт із шторки доведено до кінця", doneP && /Тема з шторки/.test(chains().at(-1).textContent), chains().at(-1)?.textContent);
+  setVal(taskInput(), "linkedin: вже набрана тема"); await sleep(30);
+  q(".agentbtn").click(); await sleep(100);
+  byText(".sheet.on .agent", "Пост з дослідженням").click(); await sleep(150);
+  check("вибір рецепта зберігає вже набраний текст після команди", taskInput().value === "/пост-з-пошуком linkedin: вже набрана тема", taskInput().value);
+  setVal(taskInput(), ""); await sleep(30);
+
   // Імпорт бази: Пам'ять → імпорт пакета
   await tab("Параметри");
   check("параметри показують режим і адресу", /вкладка браузера · app\.test/.test(q("section[aria-label=Налаштування]").textContent), q("section[aria-label=Налаштування]").textContent.match(/Зараз:[^\n]*/)?.[0]);
