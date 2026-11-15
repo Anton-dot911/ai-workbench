@@ -202,6 +202,7 @@ export async function runAgent(agent: AgentManifest, task: Task, ui: RunUi): Pro
     output,
     usage: total,
     chainId: task.chainId,
+    ...(task.chain ? { chain: task.chain } : {}),
     createdAt: Date.now(),
     steps,
     toolCalls,

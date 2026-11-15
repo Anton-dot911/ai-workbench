@@ -53,6 +53,7 @@ test("круговий шлях: експорт → очищення → імп�
   await db.artifacts.add({ id: "art-1", type: "document", title: "Док", content: "Текст", summary: "Текст", versions: [{ at: now, content: "Текст" }], updatedAt: now });
   await db.runs.add({
     id: "run-1", agentId: "docs", input: "x", output: "y", createdAt: now,
+    chainId: "ch-1", chain: { recipe: "Пост з дослідженням", topic: "x: тема", index: 1, total: 3 },
     contextSnapshot: { stable: "", relevant: "", operative: "", tokenEstimate: 0, sources: [] },
     usage: { input: 1, output: 2, cacheRead: 0, costUsd: 0.01 },
   });
@@ -62,6 +63,7 @@ test("круговий шлях: експорт → очищення → імп�
   assert.deepEqual({ p: s.profile, m: s.memory, a: s.artifacts, r: s.runs }, { p: true, m: 1, a: 1, r: 1 });
   assert.equal((await db.memory.toArray())[0].pinned, 1);
   assert.equal((await db.memory.toArray())[0].source, "agent");
+  assert.deepEqual((await db.runs.get("run-1"))?.chain, { recipe: "Пост з дослідженням", topic: "x: тема", index: 1, total: 3 }, "підпис ланцюга не губиться при імпорті");
   assert.equal((await getProfile()).tone, "діловий");
 });
 

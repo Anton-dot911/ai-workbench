@@ -51,6 +51,7 @@ export interface Task {
   upstreamOrigin?: "web";
   sessionId?: string;
   chainId?: string;
+  chain?: ChainInfo;
   mode?: string;
   /** Останні обміни цієї сесії (джерело `history`). */
   history?: { task: string; output: string }[];
@@ -119,6 +120,14 @@ export interface Artifact {
   updatedAt: number;
 }
 
+/** Належність запуску до ланцюга: рецепт, тема й місце кроку. Журнал групує запуски за `chainId` і підписує їх цими даними. */
+export interface ChainInfo {
+  recipe: string;
+  topic: string;
+  index: number;
+  total: number;
+}
+
 export interface Run {
   id: string;
   agentId: string;
@@ -127,6 +136,7 @@ export interface Run {
   output: string;
   usage: { input: number; output: number; cacheRead: number; costUsd: number; searches?: number };
   chainId?: string;
+  chain?: ChainInfo;
   createdAt: number;
   /** Джерела, на які агент послався (веб-пошук). */
   sources?: { url: string; title: string }[];

@@ -298,3 +298,9 @@ textarea.field { resize: vertical; line-height: 1.4; }
 .cs.error { color: var(--bad); }
 .cstat.stopped_cost, .cstat.error { color: var(--bad); }
 .cstat.done { color: var(--ok); }
+
+/* Журнал: ланцюги й читабельний вихід */
+.item.chain { border-color: var(--brand); }
+.sub { display: grid; gap: 6px; padding: 0 8px 8px; }
+.item.nested { background: var(--raised); border-radius: 10px; }
+.pv > div + div { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; }

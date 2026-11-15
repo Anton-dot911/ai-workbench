@@ -49,6 +49,7 @@ const RunSchema = z.object({
   usage: z.object({ input: z.number(), output: z.number(), cacheRead: z.number(), costUsd: z.number() }),
   createdAt: z.number(),
   chainId: Str.optional(),
+  chain: z.object({ recipe: Str, topic: Str, index: z.number(), total: z.number() }).optional(),
   steps: z.number().optional(),
   toolCalls: z.array(z.object({ name: Str, ok: z.boolean() })).optional(),
 });

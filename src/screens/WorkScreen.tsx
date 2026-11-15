@@ -269,7 +269,7 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
           confirmContinue: ({ result, next }) =>
             gate({ title: "Крок завершено", text: `«${name(result.agentId)}» готово, результат вище. Продовжити до «${name(next.agentId)}»?`, yes: "Продовжити", no: "Зупинити" }),
         },
-        { limitUsd: limit },
+        { limitUsd: limit, label: { recipe: recipe.name, topic: input } },
       );
       setChain((c) => ({ ...c, status: res.status, costUsd: res.costUsd, steps: c.steps.map((s) => (s.state === "run" ? { ...s, state: "stopped" } : s)) }));
       // Зупинка посеред кроку: незавершена картка кроку не лишається «в роботі».

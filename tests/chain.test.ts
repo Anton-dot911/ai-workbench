@@ -58,7 +58,7 @@ test("рецепт: Пошук → Пости → Перевірка, upstream �
   mock([searchTurn(), postsTurn(), reviewTurn()]);
   const events: string[] = [];
   const steps = postWithResearch.build("linkedin: Web Push на iOS");
-  const res = await runChain(steps, ui({ onStepStart: (i, _s, a) => events.push(`start ${i} ${a.id}`), onStepDone: (i, r) => events.push(`done ${i} ${r.agentId}`) }));
+  const res = await runChain(steps, ui({ onStepStart: (i, _s, a) => events.push(`start ${i} ${a.id}`), onStepDone: (i, r) => events.push(`done ${i} ${r.agentId}`) }), { label: { recipe: "Пост з дослідженням", topic: "linkedin: Web Push на iOS" } });
 
   assert.equal(res.status, "done");
   assert.deepEqual(res.steps.map((s) => s.agentId), ["search", "posts", "review"]);
@@ -78,6 +78,8 @@ test("рецепт: Пошук → Пости → Перевірка, upstream �
   // Усі три запуски в журналі мають один chainId, а підсумок збігається з сумою кроків.
   const runs = await db.runs.where("chainId").equals(res.chainId).toArray();
   assert.equal(runs.length, 3);
+  // Кожен запуск знає рецепт, тему й свій крок: за цим журнал групує й підписує ланцюг.
+  assert.deepEqual(runs.sort((a, b) => a.chain!.index - b.chain!.index).map((r) => r.chain), [0, 1, 2].map((index) => ({ recipe: "Пост з дослідженням", topic: "linkedin: Web Push на iOS", index, total: 3 })));
   assert.ok(Math.abs(res.costUsd - res.steps.reduce((s, x) => s + x.run.usage.costUsd, 0)) < 1e-12);
   assert.ok(res.costUsd > 0);
   assert.equal(JSON.parse(res.output).verdict, "ok");
@@ -263,4 +265,12 @@ test("рецепт: на перевірку йде перший варіант, 
   const review = ctxText(bodies[3]);
   assert.match(review, /Коротка думка про Web Push\./);
   assert.doesNotMatch(review, /Х{50}/, "варіант із перевищенням не йде на перевірку");
+});
+
+test("без підпису запуски ланцюга мають chainId, але не мають chain (сумісність зі старими записами)", async () => {
+  mock([searchTurn()]);
+  const res = await runChain([{ agentId: "search", instruction: "тема" }], ui());
+  const run = await db.runs.get(res.steps[0].run.id);
+  assert.equal(run?.chainId, res.chainId);
+  assert.equal("chain" in run!, false);
 });

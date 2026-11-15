@@ -51,6 +51,8 @@ export interface ChainUi extends RunUi {
 
 export interface ChainOptions {
   limitUsd?: number;
+  /** Підпис ланцюга для журналу: рецепт і тема. Кожен запуск зберігає його разом із номером кроку. */
+  label?: { recipe: string; topic: string };
 }
 
 export type ChainStatus = "done" | "stopped_cost" | "stopped_user" | "aborted";
@@ -95,6 +97,7 @@ export async function runChain(steps: ChainStep[], ui: ChainUi, opts: ChainOptio
     if (ui.signal?.aborted) return finish("aborted");
 
     const task: Task = { input: step.instruction, chainId };
+    if (opts.label) task.chain = { ...opts.label, index: i, total: steps.length };
     if (i > 0) {
       const upstream = step.upstreamFrom ? step.upstreamFrom(done) : done[i - 1].text;
       if (!upstream.trim()) throw new Error(`Крок «${agents[i - 1].name}» не дав результату, ланцюг зупинено.`);
