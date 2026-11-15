@@ -126,6 +126,8 @@ export interface ChainInfo {
   topic: string;
   index: number;
   total: number;
+  /** Доопрацювання: `виправлення` чи `повтор`. Такі кроки можуть стояти за межами плану (index ≥ total). */
+  label?: string;
 }
 
 export interface Run {

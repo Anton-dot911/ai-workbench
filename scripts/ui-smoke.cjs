@@ -390,6 +390,39 @@ const check = (name, cond, extra = "") => { console.log((cond ? "PASS" : "FAIL")
   await tab("Робота");
   setVal(taskInput(), ""); await sleep(30);
 
+  // Цикл «Перевірка → виправлення»: вердикт needs_changes → пости виправляються → повторна перевірка
+  const retrySeq = () => [
+    searchStep,
+    answerStep,
+    () => toolTurn({ name: "submit_posts", input: { platform: "x", variants: [{ text: "Web Push на iOS працює лише для PWA з початкового екрана.", hashtags: ["PWA"] }] } }),
+    () => toolTurn({ name: "submit_review", input: { verdict: "needs_changes", score: 6, summary: "Є фактична неточність", issues: [{ severity: "medium", category: "facts", quote: "працює лише для PWA", problem: "Не вказано версію iOS", suggestion: "Додай iOS 16.4+" }] } }),
+    () => toolTurn({ name: "submit_posts", input: { platform: "x", variants: [{ text: "Виправлено: Web Push на iOS працює лише для PWA з iOS 16.4+.", hashtags: ["PWA"] }] } }),
+    () => toolTurn({ name: "submit_review", input: { verdict: "ok", score: 9, summary: "Факти збігаються", issues: [] } }),
+  ];
+  const beforeR = posts.length;
+  const cR = chains().length;
+  seq = retrySeq();
+  await runChainCmd("/пост-з-пошуком X: Тема з виправленням");
+  const doneR = await waitFor(() => chains().length === cR + 1 && /Готово/.test(chains().at(-1).textContent) && !q(".go.stop"), 10000);
+  const barR = chains().at(-1);
+  const namesR = [...barR.querySelectorAll(".csteps .cs")].map((e) => e.textContent.replace(/[✓●○■✕]/g, "").trim());
+  check("цикл виправлення: смужка зростає до п'яти кроків, усі виконані", doneR && namesR.join("|") === "Пошук|Пости|Перевірка|Пости (виправлення)|Перевірка (повтор)" && [...barR.querySelectorAll(".csteps .cs")].every((e) => e.classList.contains("done")), namesR.join("|"));
+  check("цикл виправлення: шість запитів (пошук із паузою, пости, перевірка, виправлення, повтор)", posts.length === beforeR + 6, String(posts.length - beforeR));
+  const fixReq = uptext(posts[beforeR + 4]);
+  check("виправлення бачить звіт, попередній варіант і зауваження, усе як недовірений вміст", /<untrusted_content source="web-derived">/.test(fixReq) && /Попередні варіанти/.test(fixReq) && /Web Push на iOS працює лише для PWA з початкового екрана/.test(fixReq) && /Не вказано версію iOS/.test(fixReq) && /Web Push працює на iOS 16\.4\+/.test(fixReq) && /Виправ варіанти за зауваженнями/.test(posts[beforeR + 4].messages[0].content.at(-1).text));
+  const redoReq = uptext(posts[beforeR + 5]);
+  check("повторна перевірка бачить виправлений пост, а не старий", /Виправлено: Web Push на iOS/.test(redoReq) && !/працює лише для PWA з початкового екрана/.test(redoReq));
+  const labelsR = qa("section[aria-label=\"Робота\"] p.note").map((e) => e.textContent.replace(/\s+/g, " ").trim());
+  check("картки доопрацювання підписані без «з N»", labelsR.some((t) => /^Крок 4 · Пости \(виправлення\)/.test(t)) && labelsR.some((t) => /^Крок 5 · Перевірка \(повтор\)/.test(t)), labelsR.filter((t) => /Крок [45]/.test(t)).join(" | "));
+  const cardsR = feedCards().slice(-5);
+  check("перша перевірка показує зауваження, повторна без зауважень", /Не вказано версію iOS/.test(cardsR[2].textContent) && /Зауважень немає/.test(cardsR[4].textContent));
+  await tab("Бібліотека"); byText(".seg button", "Журнал запусків").click(); await sleep(150);
+  qa(".item.chain")[0].querySelector(".itemhead").click(); await sleep(120);
+  const nestedR = [...qa(".item.chain")[0].querySelectorAll(".item.nested .itemhead .nm")].map((e) => e.textContent.trim());
+  check("журнал: п'ять кроків, виправлення й повтор підписані", nestedR.join(" | ") === "Крок 1 з 3 · Пошук | Крок 2 з 3 · Пости | Крок 3 з 3 · Перевірка | Крок 4 · Пости (виправлення) | Крок 5 · Перевірка (повтор)", nestedR.join(" | "));
+  await tab("Робота");
+  setVal(taskInput(), ""); await sleep(30);
+
   // Імпорт бази: Пам'ять → імпорт пакета
   await tab("Параметри");
   check("параметри показують режим і адресу", /вкладка браузера · app\.test/.test(q("section[aria-label=Налаштування]").textContent), q("section[aria-label=Налаштування]").textContent.match(/Зараз:[^\n]*/)?.[0]);

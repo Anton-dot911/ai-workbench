@@ -5,7 +5,7 @@ import { beforeEach, test } from "node:test";
 import { parseRecipeCommand, postWithResearch, splitPlatform } from "../src/agents/recipes.js";
 import { resolveContext } from "../src/core/contextBuilder.js";
 import { searchAgent } from "../src/agents/search.js";
-import { DEFAULT_CHAIN_LIMIT_USD, MAX_CHAIN_STEPS, runChain, type ChainStep, type ChainUi } from "../src/core/orchestrator.js";
+import { DEFAULT_CHAIN_LIMIT_USD, MAX_CHAIN_STEPS, MAX_RETRIES, runChain, type ChainStep, type ChainUi } from "../src/core/orchestrator.js";
 import { db } from "../src/db/db.js";
 
 // T4.1: runChain. Моделі підміняються потоками SSE; перевіряються запити, ліміти, зупинки й походження upstream.
@@ -273,4 +273,139 @@ test("без підпису запуски ланцюга мають chainId, а
   const run = await db.runs.get(res.steps[0].run.id);
   assert.equal(run?.chainId, res.chainId);
   assert.equal("chain" in run!, false);
+});
+
+// ---------- цикл «Перевірка → виправлення» (retryWith) ----------
+const FIXED = { platform: "linkedin", variants: [{ text: "Виправлений пост: Web Push на iOS працює лише для PWA з iOS 16.4+.", hashtags: ["#PWA", "#iOS", "#WebPush"] }] };
+const NEEDS = {
+  verdict: "needs_changes", score: 6, summary: "Є фактична неточність",
+  issues: [
+    { severity: "low", category: "language", quote: "початкового екрана", problem: "дрібна стилістика", suggestion: "залиш як є" },
+    { severity: "medium", category: "facts", quote: "працює лише для PWA", problem: "Не вказано версію iOS", suggestion: "Додай iOS 16.4+" },
+  ],
+};
+const reviewNeeds = () => sse([start(), ...toolBlock(0, "toolu_rn", "submit_review", NEEDS), ...end("tool_use")]);
+const postsFixed = () => sse([start(), ...toolBlock(0, "toolu_pf", "submit_posts", FIXED), ...end("tool_use")]);
+const OLD_POST = POSTS.variants[0].text;
+
+test("retry: needs_changes → виправлення постів за зауваженнями → повторна перевірка виправленого тексту", async () => {
+  mock([searchTurn(), postsTurn(), reviewNeeds(), postsFixed(), reviewTurn()]);
+  const metas: string[] = [];
+  const res = await runChain(
+    postWithResearch.build("linkedin: тема"),
+    ui({ onStepStart: (i, _s, a, m) => metas.push(`${i}:${a.id}:${m.kind}:${m.label ?? ""}`) }),
+    { label: { recipe: "Пост з дослідженням", topic: "linkedin: тема" } },
+  );
+  assert.equal(res.status, "done");
+  assert.deepEqual(res.steps.map((s) => s.agentId), ["search", "posts", "review", "posts", "review"]);
+  assert.deepEqual(res.steps.map((s) => s.kind), ["plan", "plan", "plan", "fix", "redo"]);
+  assert.deepEqual(metas, ["0:search:plan:", "1:posts:plan:", "2:review:plan:", "3:posts:fix:виправлення", "4:review:redo:повтор"]);
+  assert.equal(bodies.length, 5);
+
+  // Виправлення: звіт, попередні варіанти й зауваження за серйозністю; усе як недовірений вміст, бо ланцюг читав веб.
+  const fix = ctxText(bodies[3]);
+  assert.match(fix, /<untrusted_content source="web-derived">/);
+  assert.match(fix, /Web Push на iOS працює лише для PWA на початковому екрані/, "звіт пошуку");
+  assert.ok(fix.includes(OLD_POST), "попередній варіант");
+  assert.ok(fix.indexOf("[середня, facts]") > 0 && fix.indexOf("[середня, facts]") < fix.indexOf("[низька, language]"), "серйозніші зауваження першими");
+  assert.match(fix, /Не вказано версію iOS[\s\S]*Додай iOS 16\.4\+/);
+  assert.match(bodies[3].messages[0].content.at(-1).text, /^<task>\nlinkedin: тема\. Виправ варіанти за зауваженнями/);
+
+  // Повторна перевірка бачить виправлений пост, а не старий.
+  const redo = ctxText(bodies[4]);
+  assert.match(redo, /Виправлений пост: Web Push на iOS працює лише для PWA з iOS 16\.4\+/);
+  assert.ok(!redo.includes(OLD_POST), "старий варіант не потрапляє на повторну перевірку");
+  assert.match(redo, /Джерело тверджень/);
+  assert.equal(JSON.parse(res.output).verdict, "ok");
+
+  // Журнал: кроки доопрацювання мають номер, що виходить за план, і підпис.
+  const runs = (await db.runs.where("chainId").equals(res.chainId).toArray()).sort((a, b) => a.chain!.index - b.chain!.index);
+  assert.deepEqual(runs.map((r) => [r.chain!.index, r.chain!.total, r.chain!.label ?? ""]), [[0, 3, ""], [1, 3, ""], [2, 3, ""], [3, 3, "виправлення"], [4, 3, "повтор"]]);
+});
+
+test("retry: вердикт ok не запускає виправлення", async () => {
+  mock([searchTurn(), postsTurn(), reviewTurn()]);
+  const res = await runChain(postWithResearch.build("linkedin: тема"), ui());
+  assert.equal(res.steps.length, 3);
+  assert.equal(bodies.length, 3);
+});
+
+test("retry: один цикл за замовчуванням, друга невдала перевірка не запускає третій", async () => {
+  mock([searchTurn(), postsTurn(), reviewNeeds(), postsFixed(), reviewNeeds()]);
+  const res = await runChain(postWithResearch.build("linkedin: тема"), ui());
+  assert.equal(res.status, "done");
+  assert.equal(res.steps.length, 5);
+  assert.equal(JSON.parse(res.output).verdict, "needs_changes", "вердикт лишається видимим для користувача");
+  assert.equal(bodies.length, 5);
+});
+
+test("retry: другий цикл не вміщується в ліміт кроків → зупинка stopped_steps до зайвих запитів", async () => {
+  mock([searchTurn(), postsTurn(), reviewNeeds(), postsFixed(), reviewNeeds()]);
+  const steps = postWithResearch.build("linkedin: тема");
+  steps[2].retry!.max = 2;
+  const res = await runChain(steps, ui());
+  assert.equal(res.status, "stopped_steps");
+  assert.equal(res.steps.length, 5);
+  assert.equal(bodies.length, 5, "виправлення, що не вміщається, не стартує");
+  assert.ok(res.steps.length <= MAX_CHAIN_STEPS);
+});
+
+test("retry: ліміт вартості перевіряється перед кожним кроком, зокрема перед виправленням і повтором", async () => {
+  mock([searchTurn(), postsTurn(), reviewNeeds(), postsFixed(), reviewTurn()]);
+  const gates: string[] = [];
+  const res = await runChain(postWithResearch.build("linkedin: тема"), ui({ confirmCost: async (g) => (gates.push(`${g.stepIndex}:${g.agentId}`), true) }), { limitUsd: 0.001 });
+  assert.equal(res.status, "done");
+  assert.deepEqual(gates, ["0:search", "1:posts", "2:review", "3:posts", "4:review"]);
+});
+
+test("retry: відмова від підтвердження вартості на кроці виправлення зупиняє ланцюг, результат перевірки лишається", async () => {
+  // Перевірка «витратила» 20000 вихідних токенів ≈ $0,20 (Sonnet 5.5: $10 за 1 млн): виправлення вже не вміщується в $0,20.
+  mock([searchTurn(), postsTurn(), sse([start(), ...toolBlock(0, "toolu_rn", "submit_review", NEEDS), ...end("tool_use", 20000)])]);
+  const gates: string[] = [];
+  const res = await runChain(postWithResearch.build("linkedin: тема"), ui({ confirmCost: async (g) => (gates.push(`${g.stepIndex}:${g.agentId}`), false) }), { limitUsd: 0.2 });
+  assert.equal(res.status, "stopped_cost");
+  assert.deepEqual(gates, ["3:posts"], "питає саме перед виправленням");
+  assert.deepEqual(res.steps.map((s) => s.agentId), ["search", "posts", "review"]);
+  assert.equal(bodies.length, 3);
+  assert.equal(JSON.parse(res.output).verdict, "needs_changes");
+});
+
+test("retry: валідація — невідомий агент виправлення і недопустима кількість повторів відхиляються до першого запиту", async () => {
+  mock([]);
+  const bad = (patch: (s: ChainStep) => void) => {
+    const steps = postWithResearch.build("linkedin: тема");
+    patch(steps[2]);
+    return runChain(steps, ui());
+  };
+  await assert.rejects(bad((s) => (s.retry!.fix.agentId = "nope")), /Невідомий агент/);
+  await assert.rejects(bad((s) => (s.retry!.max = 0)), /від 1 до 2/);
+  await assert.rejects(bad((s) => (s.retry!.max = 3)), /від 1 до 2/);
+  assert.equal(bodies.length, 0);
+  assert.equal(MAX_RETRIES, 2);
+});
+
+test("retry: загальний випадок без рецепта — типовий upstream виправлення це результат перевірки, повтору це виправлений текст", async () => {
+  mock([sse([start(), ...textBlock(0, "Чернетка з калькою."), ...end("end_turn")]), reviewNeeds(), postsFixed(), reviewTurn()]);
+  const res = await runChain(
+    [
+      { agentId: "docs", instruction: "напиши чернетку" },
+      { agentId: "review", instruction: "language", retry: { max: 1, needed: (r) => JSON.parse(r.text).verdict === "needs_changes", fix: { agentId: "posts", instruction: "linkedin: перепиши за зауваженнями" } } },
+    ],
+    ui(),
+  );
+  assert.equal(res.status, "done");
+  assert.equal(bodies.length, 4);
+  assert.match(ctxText(bodies[1]), /<upstream>\nЧернетка з калькою\.\n<\/upstream>/, "перевірка бачить чернетку");
+  assert.match(ctxText(bodies[2]), /<upstream>[\s\S]*Не вказано версію iOS[\s\S]*<\/upstream>/, "виправлення бачить зауваження");
+  assert.doesNotMatch(ctxText(bodies[2]), /untrusted_content/, "без веб-агентів недовіреної обгортки немає");
+  assert.match(ctxText(bodies[3]), /<upstream>[\s\S]*Виправлений пост[\s\S]*<\/upstream>/, "повтор перевіряє виправлене");
+});
+
+test("retry: pauseAfter питає один раз, а не на кожному повторі", async () => {
+  mock([searchTurn(), postsTurn(), reviewNeeds(), postsFixed(), reviewTurn()]);
+  const steps = postWithResearch.build("linkedin: тема").map((s, i) => (i === 2 ? { ...s, pauseAfter: true } : s));
+  let asked = 0;
+  const res = await runChain(steps, ui({ confirmContinue: async () => (asked++, true) }));
+  assert.equal(res.status, "done");
+  assert.equal(asked, 1);
 });

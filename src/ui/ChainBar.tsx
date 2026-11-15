@@ -19,6 +19,7 @@ const STATUS: Record<ChainView["status"], string> = {
   done: "Готово",
   stopped_cost: "Зупинено: перевищено ліміт вартості",
   stopped_user: "Зупинено вами",
+  stopped_steps: "Зупинено: ліміт кроків ланцюга",
   aborted: "Зупинено",
   error: "Помилка, ланцюг перервано",
 };

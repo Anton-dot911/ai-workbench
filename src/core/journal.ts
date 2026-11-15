@@ -54,8 +54,13 @@ export function groupRuns(runsNewestFirst: Run[], nameOf: (agentId: string) => s
   return out;
 }
 
-/** Підпис запуску всередині ланцюга: «Крок 2 з 3 · Пости». */
+/**
+ * Підпис запуску всередині ланцюга: «Крок 2 з 3 · Пости». Крок доопрацювання, що стоїть за межами плану,
+ * підписується без «з N»: «Крок 4 · Пости (виправлення)».
+ */
 export function stepLabel(r: Run, position: number, nameOf: (agentId: string) => string): string {
-  const n = r.chain ? r.chain.index + 1 : position + 1;
-  return `Крок ${n}${r.chain ? ` з ${r.chain.total}` : ""} · ${nameOf(r.agentId)}`;
+  const c = r.chain;
+  const n = c ? c.index + 1 : position + 1;
+  const of = c && c.index < c.total ? ` з ${c.total}` : "";
+  return `Крок ${n}${of} · ${nameOf(r.agentId)}${c?.label ? ` (${c.label})` : ""}`;
 }
