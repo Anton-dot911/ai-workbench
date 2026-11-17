@@ -20,6 +20,7 @@ import { ConfirmSheet } from "../ui/ConfirmSheet";
 import { FactForm } from "../ui/FactForm";
 import { GateSheet, type GateRequest } from "../ui/GateSheet";
 import { Icon } from "../ui/Icon";
+import type { HandoffRequest } from "../tools/types";
 import { PlanCard, type PlanView } from "../ui/PlanCard";
 import { PostCard } from "../ui/PostCard";
 import { ReviewCard } from "../ui/ReviewCard";
@@ -53,6 +54,7 @@ interface FeedItem {
   links?: { url: string; title: string }[];
   usage?: { input: number; output: number; cacheRead: number; costUsd: number; searches?: number };
   steps?: number;
+  handoffs?: number;
   sources?: number;
   runId?: string;
   saved?: boolean;
@@ -161,6 +163,21 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
     await runOne(ag, text, s);
   }
 
+  /** Передача завдання іншому агентові: завжди з підтвердженням і оцінкою вартості (шторка). Закриття шторки = відмова. */
+  const confirmHandoff = (r: HandoffRequest) =>
+    new Promise<boolean>((resolve) =>
+      setPending({
+        kind: "gate",
+        req: {
+          title: "Передача завдання",
+          text: `«${getAgent(r.fromAgentId).name}» просить передати завдання «${getAgent(r.toAgentId).name}»: «${r.instruction.length > 240 ? r.instruction.slice(0, 240) + "…" : r.instruction}». Оцінка вартості до ${money(r.estimateUsd)} (найгірший випадок). Дозволити?`,
+          yes: "Дозволити",
+          no: "Відмовити",
+        },
+        resolve,
+      }),
+    );
+
   /** Один запуск агента: звичайна задача, команда або одинарний крок плану роутера. */
   async function runOne(ag: AgentManifest, text: string, s: Session, opts: { keepTask?: boolean } = {}) {
     const task = sessionTask({ ...s, task: text });
@@ -184,6 +201,7 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
           })),
         confirm: (req) => new Promise<ConfirmDecision>((resolve) => setPending({ kind: "confirm", req, resolve })),
         ask: (req) => new Promise<string>((resolve) => setPending({ kind: "ask", req, resolve })),
+        confirmHandoff,
       });
       finishItem(id, ag, run, out, stopReason);
       setSession((st) => ({ turns: [...st.turns, { task: text, output: summarizeOutput(ag.id, out) }].slice(-8) }));
@@ -283,6 +301,7 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
       runId: run.id,
       usage: run.usage,
       steps: run.steps,
+      handoffs: run.handoffs?.length,
       sources: run.contextSnapshot.sources.length,
       truncated: stopReason === "max_tokens",
     }));
@@ -341,6 +360,7 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
             })),
           confirm: (req) => new Promise<ConfirmDecision>((resolve) => setPending({ kind: "confirm", req, resolve })),
           ask: (req) => new Promise<string>((resolve) => setPending({ kind: "ask", req, resolve })),
+          confirmHandoff,
           onStepStart: (i, step, ag, meta) => {
             cur = crypto.randomUUID();
             const id = cur;
@@ -562,6 +582,7 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
                   {it.usage.searches ? ` · пошуків ${it.usage.searches}` : ""}
                   {it.sources !== undefined ? ` · джерел контексту ${it.sources}` : ""}
                   {it.steps && it.steps > 1 ? ` · кроків ${it.steps}` : ""}
+                  {it.handoffs ? ` · передач ${it.handoffs}` : ""}
                 </p>
               )}
               {it.status === "done" && it.agentId !== "review" && it.agentId !== "posts" && (

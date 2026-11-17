@@ -39,6 +39,8 @@ export interface AgentManifest {
   output: { kind: "text" | "markdown" | "code" | "json" | "document"; schema?: JSONSchema; saveAs?: ArtifactType };
   maxTokens: number;
   examples: string[];
+  /** Кому цей агент може передавати завдання інструментом `handoff` (лише так, і лише з підтвердженням). */
+  handoffTo?: string[];
 }
 
 export type Tier = "stable" | "relevant" | "operative";
@@ -130,6 +132,16 @@ export interface ChainInfo {
   label?: string;
 }
 
+/** Вкладений запуск, який агент ініціював інструментом `handoff` (підтверджений користувачем). Вартість входить у `usage` батьківського запуску. */
+export interface HandoffRecord {
+  agentId: string;
+  instruction: string;
+  output: string;
+  usage: { input: number; output: number; cacheRead: number; costUsd: number; searches?: number };
+  sources?: { url: string; title: string }[];
+  depth: number;
+}
+
 export interface Run {
   id: string;
   agentId: string;
@@ -145,6 +157,8 @@ export interface Run {
   /** Кількість викликів моделі в циклі tool use. */
   steps?: number;
   toolCalls?: { name: string; ok: boolean }[];
+  /** Передачі завдань іншим агентам під час цього запуску. */
+  handoffs?: HandoffRecord[];
 }
 
 /** Пропозиція факту від агента: потрапляє в чергу, а в пам'ять лише після підтвердження користувача. */

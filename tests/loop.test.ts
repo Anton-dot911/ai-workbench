@@ -85,7 +85,8 @@ test("цикл: інструмент → підтвердження → резу
   assert.equal(second.at(-2).content.find((b: any) => b.type === "tool_use").id, "toolu_1");
   assert.equal(second.at(-1).content[0].type, "tool_result");
   assert.equal(second.at(-1).content[0].tool_use_id, "toolu_1");
-  assert.equal(bodies[0].tools.length, 6, "інструменти агента передаються в запиті");
+  // «Документи»: 6 інструментів редагування й пам'яті + handoff до «Пошуку» (T4.4).
+  assert.deepEqual(bodies[0].tools.map((t: any) => t.name).sort(), ["apply_edits", "ask_user", "handoff", "propose_memory", "read_artifact", "save_artifact", "search_context"].sort(), "інструменти агента передаються в запиті");
 });
 
 test("користувач відхилив зміну → tool_result з is_error, фрагмент не змінено", async () => {
