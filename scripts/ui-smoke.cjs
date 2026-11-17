@@ -219,7 +219,7 @@ const check = (name, cond, extra = "") => { console.log((cond ? "PASS" : "FAIL")
   ] } };
   setVal(taskInput(), "/перевір language"); await sleep(60); q(".go").click(); await sleep(900);
   check("агент перемкнувся на «Перевірку» командою", q(".agentbtn h1").textContent === "Перевірка");
-  check("запит має tool_choice auto і лише завершальний інструмент (обов'язковість перевіряє runAgent)", posts.at(-1).tool_choice?.type === "auto" && posts.at(-1).tools.length === 1 && posts.at(-1).tools[0].name === "submit_review" && !("temperature" in posts.at(-1)), JSON.stringify(posts.at(-1).tool_choice));
+  check("запит має tool_choice auto і лише завершальний інструмент (обов'язковість перевіряє runAgent)", posts.at(-1).tool_choice?.type === "auto" && posts.at(-1).tools.some((t) => t.name === "submit_review") && posts.at(-1).tools.every((t) => t.name === "submit_review" || t.name === "handoff") && !("temperature" in posts.at(-1)), JSON.stringify(posts.at(-1).tool_choice));
   check("картка перевірки: вердикт, оцінка, зауваження", /Потрібні правки/.test(lastCard().textContent) && /оцінка 6 \/ 10/.test(lastCard().textContent) && qa(".iss").length >= 2);
   check("серйозніше зауваження першим", qa(".iss")[0].classList.contains("medium"));
   const fixBtn = inCard("Застосувати виправлення (1)");
@@ -532,6 +532,42 @@ const check = (name, cond, extra = "") => { console.log((cond ? "PASS" : "FAIL")
   await sendTask("/док скороти цей текст");
   await waitFor(() => posts.length === beforeD + 1 && !q(".go.stop"), 6000);
   check("команда агента обходить роутер і виводить із режиму «Авто»", !posts[beforeD].tools.some((t) => t.name === "route_decision") && !/Авто/.test(q(".agentbtn").getAttribute("aria-label")) && /Документи/.test(q(".agentbtn").getAttribute("aria-label")), q(".agentbtn")?.getAttribute("aria-label"));
+  setVal(taskInput(), ""); await sleep(30);
+
+  // Передача завдань (T4.4): «Документи» передають пошук, користувач підтверджує з оцінкою, результат і журнал
+  await tab("Робота");
+  q(".agentbtn").click(); await sleep(100);
+  byText(".sheet.on .agent", "Документи").click(); await sleep(120);
+  const handoffTurn = () => toolTurn({ name: "handoff", input: { agentId: "search", instruction: "Знайди першоджерело про Web Push на iOS і назви версію" } });
+  const beforeH = posts.length;
+  seq = [handoffTurn, searchStep, answerStep, textTurn];
+  setVal(taskInput(), "допиши джерело до твердження про Web Push"); await sleep(60); q(".go").click();
+  const gateH = await waitFor(() => /Передача завдання/.test(q(".sheet.on")?.textContent ?? ""));
+  check("handoff: шторка підтвердження з назвами агентів, інструкцією й оцінкою вартості", gateH && /«Документи» просить передати завдання «Пошук»/.test(q(".sheet.on").textContent) && /Оцінка вартості до \$0,\d\d/.test(q(".sheet.on").textContent), q(".sheet.on")?.textContent?.slice(0, 260));
+  check("до підтвердження вкладеного запиту ще немає", posts.length === beforeH + 1);
+  byText(".sheet.on button", "Дозволити").click();
+  const doneH = await waitFor(() => posts.length === beforeH + 4 && !q(".go.stop"), 8000);
+  check("після «Дозволити»: вкладений пошук (з веб-інструментом), потім відповідь батька", doneH && posts[beforeH + 2].tools.some((t) => t.type === "web_search_20250305") && !posts[beforeH + 2].tools.some((t) => t.name === "handoff"), String(posts.length - beforeH));
+  const resH = posts[beforeH + 3].messages.at(-1).content[0];
+  check("результат передачі повернуто батькові як недовірений вміст (tool_result без is_error)", resH.type === "tool_result" && !resH.is_error && /<untrusted_content source="web-derived">/.test(resH.content) && /Джерела:/.test(resH.content));
+  const cardH = feedCards().at(-1);
+  check("картка батька: видно передачі в статусі запуску", /передач 1/.test(cardH.textContent), cardH.textContent.slice(-200));
+  await tab("Бібліотека"); byText(".seg button", "Журнал запусків").click(); await sleep(150);
+  let handRun = qa(".item").find((e) => /допиши джерело/.test(e.textContent));
+  if (handRun) { handRun.querySelector(".itemhead").click(); await sleep(120); handRun = qa(".item").find((e) => /допиши джерело/.test(e.textContent)); }
+  check("журнал: один запис батька, у ньому рядок передачі з вартістю", !!handRun && /Передача → Пошук/.test(handRun.textContent) && qa(".item").filter((e) => /допиши джерело/.test(e.textContent)).length === 1, handRun?.textContent.slice(0, 200));
+  await tab("Робота");
+  setVal(taskInput(), ""); await sleep(30);
+
+  // Відмова від передачі: агент продовжує без неї
+  const beforeR2 = posts.length;
+  seq = [handoffTurn, textTurn];
+  setVal(taskInput(), "ще раз про Web Push"); await sleep(60); q(".go").click();
+  await waitFor(() => !!byText(".sheet.on button", "Відмовити"));
+  byText(".sheet.on button", "Відмовити").click();
+  const declined = await waitFor(() => posts.length === beforeR2 + 2 && !q(".go.stop"), 6000);
+  const resD = posts[beforeR2 + 1].messages.at(-1).content[0];
+  check("відмова: вкладеного запиту немає, агент отримує is_error і продовжує", declined && resD.is_error === true && posts.length === beforeR2 + 2, String(posts.length - beforeR2));
   setVal(taskInput(), ""); await sleep(30);
 
   // Імпорт бази: Пам'ять → імпорт пакета

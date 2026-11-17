@@ -50,6 +50,11 @@ export function LibraryScreen() {
             {r.steps && r.steps > 1 ? ` · кроків ${r.steps}` : ""}
             {r.toolCalls?.length ? ` · інструменти: ${r.toolCalls.map((t) => t.name + (t.ok ? "" : "✕")).join(", ")}` : ""}
           </p>
+          {r.handoffs?.map((h, k) => (
+            <p key={k} className="note mx tnum">
+              Передача → {agentName(h.agentId)} · {money(h.usage.costUsd)} · «{h.instruction.length > 100 ? h.instruction.slice(0, 100) + "…" : h.instruction}»
+            </p>
+          ))}
           {r.contextSnapshot.sources.length > 0 && (
             <div className="chips mx">
               {r.contextSnapshot.sources.map((src) => (

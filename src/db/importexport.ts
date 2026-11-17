@@ -52,6 +52,7 @@ const RunSchema = z.object({
   chain: z.object({ recipe: Str, topic: Str, index: z.number(), total: z.number(), label: Str.optional() }).optional(),
   steps: z.number().optional(),
   toolCalls: z.array(z.object({ name: Str, ok: z.boolean() })).optional(),
+  handoffs: z.array(z.object({ agentId: Str, instruction: Str, output: z.string(), depth: z.number(), usage: z.object({ input: z.number(), output: z.number(), cacheRead: z.number(), costUsd: z.number(), searches: z.number().optional() }), sources: z.array(z.object({ url: Str, title: z.string() })).optional() })).optional(),
 });
 
 export interface Bundle {

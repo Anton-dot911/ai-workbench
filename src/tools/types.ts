@@ -28,6 +28,17 @@ export interface AskRequest {
   options?: string[];
 }
 
+/** Запит на передачу завдання іншому агентові: показується користувачеві з оцінкою вартості. */
+export interface HandoffRequest {
+  fromAgentId: string;
+  toAgentId: string;
+  instruction: string;
+  /** Найгірший випадок вартості вкладеного запуску. */
+  estimateUsd: number;
+  /** Глибина вкладення нового запуску (1 — перша передача). */
+  depth: number;
+}
+
 export interface ToolContext {
   signal?: AbortSignal;
   /** Скільки разів у цьому запуску вже викликано кожен інструмент (включно з поточним викликом). */
@@ -35,6 +46,13 @@ export interface ToolContext {
   /** Агент і джерело даних, з якими працює запуск (для propose_memory). */
   agentId?: string;
   origin?: "user" | "web";
+  /** Передача завдань: надає runAgent агентам із `handoffTo`. */
+  handoff?: {
+    /** Глибина поточного запуску (0 — верхній рівень). */
+    depth: number;
+    allowed: string[];
+    run(req: { agentId: string; instruction: string }): Promise<ToolResult>;
+  };
   ui: {
     confirm?: (r: ConfirmRequest) => Promise<ConfirmDecision>;
     ask?: (r: AskRequest) => Promise<string>;

@@ -1,12 +1,14 @@
+import { AGENTS } from "../agents/registry";
 import { db } from "../db/db";
 import { TOOL_HANDLERS } from "../tools/handlers";
-import type { AskRequest, ConfirmDecision, ConfirmRequest, ToolContext, ToolResult } from "../tools/types";
+import type { AskRequest, ConfirmDecision, ConfirmRequest, ToolContext, ToolResult, HandoffRequest } from "../tools/types";
 import { ApiError, streamMessage, type ContentBlock, type MessageRequest } from "./claude";
 import { renderCitations, type Source } from "./citations";
-import { resolveContext } from "./contextBuilder";
+import { neutralize, resolveContext, untrusted } from "./contextBuilder";
+import { worstCaseRunUsd } from "./estimate";
 import { costFor } from "./prices";
 import { MODEL_MAP } from "./settings";
-import type { AgentManifest, ContextPacket, Run, Task } from "./types";
+import type { AgentManifest, ContextPacket, HandoffRecord, Run, Task } from "./types";
 
 export interface ToolEvent {
   name: string;
@@ -22,6 +24,8 @@ export interface RunUi {
   onTool?: (e: ToolEvent) => void;
   confirm?: (r: ConfirmRequest) => Promise<ConfirmDecision>;
   ask?: (r: AskRequest) => Promise<string>;
+  /** Підтвердження передачі завдання іншому агентові (з оцінкою вартості). Без обробника передача відхиляється. */
+  confirmHandoff?: (r: HandoffRequest) => Promise<boolean>;
 }
 
 export interface RunResult {
@@ -82,7 +86,19 @@ async function execTool(call: ContentBlock, ctx: ToolContext): Promise<ToolResul
  * Цикл tool use: модель викликає інструменти, поки не поверне відповідь без tool_use.
  * Дії зі змінами проходять через підтвердження користувача (diff) всередині обробників інструментів.
  */
-export async function runAgent(agent: AgentManifest, task: Task, ui: RunUi): Promise<RunResult> {
+/** Скільки символів результату вкладеного запуску повертається батьківському агентові. */
+export const MAX_HANDOFF_RESULT_CHARS = 20_000;
+
+/** Результат передачі як tool_result: джерела списком; дані з інтернету обгорнуто як недовірений вміст (інваріант 17). */
+export function handoffContent(web: boolean, text: string, sources: Source[]): string {
+  let body = text.length > MAX_HANDOFF_RESULT_CHARS ? `${text.slice(0, MAX_HANDOFF_RESULT_CHARS)}\n…(результат скорочено)` : text;
+  if (sources.length) body += `\n\nДжерела:\n${sources.map((s, i) => `[${i + 1}] ${s.title || s.url} — ${s.url}`).join("\n")}`;
+  const safe = neutralize(body);
+  return web ? untrusted("web_derived", safe) : safe;
+}
+
+export async function runAgent(agent: AgentManifest, task: Task, ui: RunUi, opts: { depth?: number; persist?: boolean } = {}): Promise<RunResult> {
+  const depth = opts.depth ?? 0;
   const { packet: ctx } = await resolveContext(agent, task);
   const req = buildRequest(agent, ctx, task);
   const messages = [...req.messages];
@@ -99,6 +115,35 @@ export async function runAgent(agent: AgentManifest, task: Task, ui: RunUi): Pro
 
   const total = { input: 0, output: 0, cacheRead: 0, costUsd: 0, searches: 0 };
   const toolCalls: { name: string; ok: boolean }[] = [];
+  const handoffs: HandoffRecord[] = [];
+
+  /**
+   * Передача завдання: підтвердження користувача з оцінкою вартості, вкладений запуск (глибина +1, без запису в журнал),
+   * результат як tool_result. Вартість вкладеного запуску входить у `total` цього запуску.
+   */
+  const delegate = async (req: { agentId: string; instruction: string }): Promise<ToolResult> => {
+    const target = AGENTS.find((a) => a.id === req.agentId);
+    if (!target) return { content: `Невідомий агент: ${req.agentId}`, isError: true };
+    const nested: Task = { input: req.instruction };
+    if (!ui.confirmHandoff) return { content: "Підтвердження передачі недоступне, завдання не передано.", isError: true };
+    const estimateUsd = worstCaseRunUsd(target, await resolveContext(target, nested), req.instruction);
+    const approved = await ui.confirmHandoff({ fromAgentId: agent.id, toAgentId: target.id, instruction: req.instruction, estimateUsd, depth: depth + 1 });
+    if (!approved) return { content: "Користувач відмовив у передачі завдання. Продовжуй без неї.", isError: true };
+    // Текст вкладеного запуску не змішується з відповіддю цього агента; події інструментів (веб-пошук) показуються.
+    const res = await runAgent(target, nested, { token: ui.token, signal: ui.signal, onTool: ui.onTool, confirm: ui.confirm, ask: ui.ask, confirmHandoff: ui.confirmHandoff }, { depth: depth + 1, persist: false });
+    const u = res.run.usage;
+    total.input += u.input;
+    total.output += u.output;
+    total.cacheRead += u.cacheRead;
+    total.costUsd += u.costUsd;
+    total.searches += u.searches ?? 0;
+    handoffs.push({ agentId: target.id, instruction: req.instruction, output: res.text, usage: u, ...(res.sources.length ? { sources: res.sources } : {}), depth: depth + 1 });
+    const web = !!target.serverTools?.length;
+    // Після читання інтернету пропозиції пам'яті цього запуску теж позначаються як веб-походження (інваріант 17).
+    if (web) toolCtx.origin = "web";
+    return { content: handoffContent(web, res.text, res.sources) };
+  };
+  if (agent.handoffTo?.length) toolCtx.handoff = { depth, allowed: agent.handoffTo, run: delegate };
   let text = "";
   let gap = false;
   let stopReason: string | null = null;
@@ -207,7 +252,8 @@ export async function runAgent(agent: AgentManifest, task: Task, ui: RunUi): Pro
     steps,
     toolCalls,
     ...(sources.length ? { sources } : {}),
+    ...(handoffs.length ? { handoffs } : {}),
   };
-  await db.runs.add(run);
+  if (opts.persist !== false) await db.runs.add(run);
   return { run, text: output, stopReason, sources };
 }
