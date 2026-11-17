@@ -5,6 +5,8 @@ import type { Task } from "./types";
 export interface Session {
   /** Поточний агент на екрані «Робота». */
   agentId: string;
+  /** Режим «Авто»: вільний текст (без команди) спершу йде через роутер, який пропонує план. */
+  auto: boolean;
   task: string;
   frag: string;
   turns: { task: string; output: string }[];
@@ -14,7 +16,7 @@ export interface Session {
   runNonce: number;
 }
 
-let state: Session = { agentId: "docs", task: "", frag: "", turns: [], toggles: {}, extraArtifactIds: [], runNonce: 0 };
+let state: Session = { agentId: "docs", auto: false, task: "", frag: "", turns: [], toggles: {}, extraArtifactIds: [], runNonce: 0 };
 const subs = new Set<() => void>();
 
 export const getSession = (): Session => state;

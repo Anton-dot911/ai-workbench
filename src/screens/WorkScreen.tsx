@@ -7,7 +7,8 @@ import type { Resolved } from "../core/contextBuilder";
 import { estimateRun } from "../core/estimate";
 import { runChain, type ChainStep } from "../core/orchestrator";
 import { runAgent, type ToolEvent } from "../core/runner";
-import { getSession, sessionTask, setSession, useSession } from "../core/session";
+import { estimatePlanUsd, LOW_CONFIDENCE, routeTask, type RouteDecision } from "../core/router";
+import { getSession, sessionTask, setSession, useSession, type Session } from "../core/session";
 import { getChainLimit } from "../core/settings";
 import type { AgentManifest, Run } from "../core/types";
 import { addMemory, db, saveRunAsArtifact, saveTextArtifact } from "../db/db";
@@ -19,6 +20,7 @@ import { ConfirmSheet } from "../ui/ConfirmSheet";
 import { FactForm } from "../ui/FactForm";
 import { GateSheet, type GateRequest } from "../ui/GateSheet";
 import { Icon } from "../ui/Icon";
+import { PlanCard, type PlanView } from "../ui/PlanCard";
 import { PostCard } from "../ui/PostCard";
 import { ReviewCard } from "../ui/ReviewCard";
 import { SourceList } from "../ui/SourceList";
@@ -55,8 +57,10 @@ interface FeedItem {
   runId?: string;
   saved?: boolean;
   /** Заголовок ланцюга (kind = "chain"): кроки, стан, витрати. */
-  kind?: "chain";
+  kind?: "chain" | "plan";
   chain?: ChainView;
+  /** План від роутера (kind = "plan"): показується завжди, виконується лише після підтвердження. */
+  plan?: PlanView;
   /** Крок ланцюга: у картці замість задачі показується «Крок i з n». */
   chainStep?: { index: number; total: number; label?: string };
   /** Тема ланцюга: назва збереженого артефакту й контекст «Перевірки» замість службової інструкції кроку. */
@@ -83,6 +87,8 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
   const [remember, setRemember] = useState<FeedItem | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const abort = useRef<AbortController | null>(null);
+  /** Плани роутера, що чекають на підтвердження: рішення, початкова задача й фрагмент. */
+  const plans = useRef(new Map<string, { decision: RouteDecision; text: string; frag: string; started?: boolean }>());
   const feedRef = useRef<HTMLDivElement>(null);
   const lastNonce = useRef(session.runNonce);
 
@@ -129,14 +135,16 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
       await sendChain(rc.recipe, rc.rest, text);
       return;
     }
-    if (text.startsWith("/")) {
+    const isCommand = text.startsWith("/");
+    if (isCommand) {
       const cmd = parseCommand(text);
       if (!cmd) {
         toast(`Невідома команда. Доступні: ${[...AGENTS.flatMap((a) => a.commands.slice(0, 1)), ...RECIPES.map((r) => r.commands[0])].join(", ")}`);
         return;
       }
       ag = cmd.agent;
-      setSession({ agentId: ag.id });
+      // Явна команда агента виводить із режиму «Авто»: далі працює обраний агент.
+      setSession({ agentId: ag.id, auto: false });
       text = cmd.rest;
       if (!text) {
         setSession({ task: "" });
@@ -145,10 +153,20 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
       }
     }
 
+    // Режим «Авто»: вільний текст іде через роутер, який лише пропонує план (виконання після підтвердження).
+    if (s.auto && !isCommand) {
+      await sendAuto(text, s);
+      return;
+    }
+    await runOne(ag, text, s);
+  }
+
+  /** Один запуск агента: звичайна задача, команда або одинарний крок плану роутера. */
+  async function runOne(ag: AgentManifest, text: string, s: Session, opts: { keepTask?: boolean } = {}) {
     const task = sessionTask({ ...s, task: text });
     const id = crypto.randomUUID();
     setFeed((f) => [...f, { id, agentId: ag.id, agentName: ag.name, task: text, selection: task.selection, output: "", status: "running", tools: [] }]);
-    setSession({ task: "" });
+    if (!opts.keepTask) setSession({ task: "" });
     setBusy(true);
     const ac = new AbortController();
     abort.current = ac;
@@ -185,6 +203,76 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
     }
   }
 
+  /** Режим «Авто»: роутер складає план, але нічого не виконує. Картка плану показується завжди. */
+  async function sendAuto(text: string, s: Session) {
+    const id = crypto.randomUUID();
+    const frag = s.frag.trim();
+    setFeed((f) => [...f, { id, kind: "plan", agentId: "auto", agentName: "Авто", task: text, ...(frag ? { selection: frag } : {}), output: "", status: "running", tools: [] }]);
+    setSession({ task: "" });
+    setBusy(true);
+    const ac = new AbortController();
+    abort.current = ac;
+    try {
+      const { decision, costUsd } = await routeTask(text, { token, signal: ac.signal, ...(frag ? { selectionChars: frag.length } : {}) });
+      const estimate = decision.kind === "plan" ? await estimatePlanUsd(decision.steps) : 0;
+      plans.current.set(id, { decision, text, frag });
+      const plan: PlanView = {
+        summary: decision.summary,
+        confidence: decision.confidence,
+        lowConfidence: decision.confidence < LOW_CONFIDENCE,
+        steps: decision.kind === "plan" ? decision.steps.map((st) => ({ agentName: getAgent(st.agentId).name, instruction: st.instruction })) : [],
+        ...(decision.kind === "clarify" ? { clarify: decision.question } : {}),
+        ...(decision.kind === "plan" && decision.recipe ? { recipe: decision.recipe.name } : {}),
+        estimateUsd: estimate,
+        routerUsd: costUsd,
+        limitUsd: getChainLimit(),
+        state: "pending",
+      };
+      patch(id, () => ({ status: "done", plan }));
+    } catch (e) {
+      if (e instanceof ApiError && e.kind === "aborted") {
+        patch(id, () => ({ status: "stopped" }));
+      } else {
+        if (e instanceof ApiError && e.kind === "auth") onAuthError();
+        patch(id, () => ({ status: "error", error: e instanceof Error ? e.message : String(e) }));
+      }
+      setSession((st) => ({ task: st.task || text }));
+    } finally {
+      setBusy(false);
+      abort.current = null;
+      onSpent();
+    }
+  }
+
+  const setPlanState = (id: string, state: PlanView["state"]) => patch(id, (i) => (i.plan ? { plan: { ...i.plan, state } } : {}));
+
+  /** Підтвердження плану: один агент іде звичайним запуском (із фрагментом), кілька кроків через runChain. */
+  async function runPlan(id: string) {
+    const p = plans.current.get(id);
+    if (!p || p.started || p.decision.kind !== "plan") return;
+    if (busy) {
+      toast("Зачекайте, поки завершиться поточний запуск");
+      return;
+    }
+    p.started = true;
+    setPlanState(id, "started");
+    const d = p.decision;
+    if (d.steps.length === 1 && !d.recipe) {
+      await runOne(getAgent(d.steps[0].agentId), d.steps[0].instruction, { ...getSession(), frag: p.frag }, { keepTask: true });
+    } else {
+      await runSteps(d.recipe ? d.recipe.name : "Авто", d.recipe ? d.recipe.input : p.text, d.steps, p.text, { clear: false, ...(p.frag ? { selection: p.frag } : {}) });
+    }
+  }
+
+  /** Скасування плану або уточнення: початкова задача повертається в поле вводу. */
+  function cancelPlan(id: string) {
+    const p = plans.current.get(id);
+    if (!p || p.started) return;
+    p.started = true;
+    setPlanState(id, "cancelled");
+    setSession((st) => ({ task: st.task || p.text }));
+  }
+
   /** Завершення запуску: підсумок, джерела, вартість; пропозиції пам'яті від агента. Спільне для одиночного запуску й кроків ланцюга. */
   function finishItem(id: string, ag: AgentManifest, run: Run, out: string, stopReason: string | null) {
     patch(id, () => ({
@@ -211,18 +299,23 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
       toast(e instanceof Error ? e.message : "Не вдалося скласти ланцюг");
       return;
     }
+    await runSteps(recipe.name, input, steps, raw);
+  }
+
+  /** Виконання ланцюга кроків: рецепт, або план роутера. `label` і `topic` підписують ланцюг у заголовку й журналі. */
+  async function runSteps(label: string, topic: string, steps: ChainStep[], raw: string, opts: { selection?: string; clear?: boolean } = {}) {
     const limit = getChainLimit();
     const headId = crypto.randomUUID();
     const view: ChainView = {
-      recipe: recipe.name,
-      topic: input,
+      recipe: label,
+      topic,
       steps: steps.map((s) => ({ agentId: s.agentId, name: getAgent(s.agentId).name, state: "wait" })),
       status: "running",
       costUsd: 0,
       limitUsd: limit,
     };
-    setFeed((f) => [...f, { id: headId, kind: "chain", chain: view, agentId: "", agentName: recipe.name, task: input, output: "", status: "running", tools: [] }]);
-    setSession({ task: "" });
+    setFeed((f) => [...f, { id: headId, kind: "chain", chain: view, agentId: "", agentName: label, task: topic, output: "", status: "running", tools: [] }]);
+    if (opts.clear !== false) setSession({ task: "" });
     setBusy(true);
     const ac = new AbortController();
     abort.current = ac;
@@ -251,7 +344,7 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
           onStepStart: (i, step, ag, meta) => {
             cur = crypto.randomUUID();
             const id = cur;
-            setFeed((f) => [...f, { id, agentId: ag.id, agentName: ag.name, task: step.instruction, topic: splitPlatform(input).topic, output: "", status: "running", tools: [], chainStep: { index: i, total: steps.length, ...(meta.label ? { label: meta.label } : {}) } }]);
+            setFeed((f) => [...f, { id, agentId: ag.id, agentName: ag.name, task: step.instruction, topic: splitPlatform(topic).topic, output: "", status: "running", tools: [], chainStep: { index: i, total: steps.length, ...(meta.label ? { label: meta.label } : {}) } }]);
             // Доопрацювання (виправлення, повтор) додає кроки за межами плану: смужка росте.
             setChain((c) => ({ ...c, steps: i < c.steps.length ? c.steps.map((s, n) => (n === i ? { ...s, state: "run" } : s)) : [...c.steps, { agentId: ag.id, name: ag.name + (meta.label ? ` (${meta.label})` : ""), state: "run" }] }));
           },
@@ -271,7 +364,7 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
           confirmContinue: ({ result, next }) =>
             gate({ title: "Крок завершено", text: `«${name(result.agentId)}» готово, результат вище. Продовжити до «${name(next.agentId)}»?`, yes: "Продовжити", no: "Зупинити" }),
         },
-        { limitUsd: limit, label: { recipe: recipe.name, topic: input } },
+        { limitUsd: limit, label: { recipe: label, topic }, ...(opts.selection ? { selection: opts.selection } : {}) },
       );
       setChain((c) => ({ ...c, status: res.status, costUsd: res.costUsd, steps: c.steps.map((s) => (s.state === "run" ? { ...s, state: "stopped" } : s)) }));
       // Зупинка посеред кроку: незавершена картка кроку не лишається «в роботі».
@@ -378,6 +471,23 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
         {feed.map((it) =>
           it.kind === "chain" && it.chain ? (
             <ChainBar key={it.id} chain={it.chain} />
+          ) : it.kind === "plan" ? (
+            <div key={it.id}>
+              <div className="task">
+                <span>{it.task}</span>
+              </div>
+              {it.selection && <p className="note right">з фрагментом, {fmt(it.selection.length)} симв.</p>}
+              <p className="note right">Авто</p>
+              {it.status === "running" && <p className="note">Роутер складає план…</p>}
+              {it.status === "error" && (
+                <div className="warn mx">
+                  <Icon name="alert" size={18} />
+                  <span>{it.error}</span>
+                </div>
+              )}
+              {it.status === "stopped" && <p className="note">Зупинено.</p>}
+              {it.plan && <PlanCard plan={it.plan} onRun={() => void runPlan(it.id)} onCancel={() => cancelPlan(it.id)} />}
+            </div>
           ) : (
           <div key={it.id}>
             {it.chainStep ? (

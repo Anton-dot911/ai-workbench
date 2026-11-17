@@ -448,6 +448,92 @@ const check = (name, cond, extra = "") => { console.log((cond ? "PASS" : "FAIL")
   check("вибір рецепта зберігає вже набраний текст після команди", taskInput().value === "/пост-з-пошуком linkedin: вже набрана тема", taskInput().value);
   setVal(taskInput(), ""); await sleep(30);
 
+  // Роутер (T4.3): режим «Авто» у шторці агентів, план показується завжди, виконання після підтвердження
+  const routerTurn = (input) => () => toolTurn({ name: "route_decision", input });
+  const planCard = () => qa("section.plan").at(-1);
+  const sendTask = async (text) => { setVal(taskInput(), text); await sleep(60); q(".go").click(); };
+
+  q(".agentbtn").click(); await sleep(100);
+  const autoItem = qa(".sheet.on .agent")[0];
+  check("шторка агентів: «Авто» першим пунктом з описом", !!autoItem && /^✦?Авто/.test(autoItem.textContent.trim()) && /роутер запропонує/.test(autoItem.textContent), autoItem?.textContent);
+  autoItem.click(); await sleep(150);
+  check("режим «Авто» увімкнено: заголовок і підказка", /Авто/.test(q(".agentbtn").getAttribute("aria-label")) && !q(".sheet.on") && /Авто/.test(q(".toast").textContent), q(".agentbtn")?.getAttribute("aria-label"));
+
+  const beforeA = posts.length;
+  const cA = chains().length;
+  seq = [routerTurn({ summary: "Пост з дослідженням для X про тему від роутера", confidence: 0.92, steps: [], recipe: "post-research", recipeInput: "x: Тема від роутера" })];
+  await sendTask("зроби пост для X про тему від роутера з дослідженням");
+  const planned = await waitFor(() => !!planCard());
+  check("вільний текст у режимі «Авто» дає картку плану", planned, "картки немає");
+  const reqA = posts[beforeA];
+  check("запит роутера: модель fast, один інструмент route_decision, tool_choice auto, без temperature", posts.length === beforeA + 1 && /haiku/.test(reqA.model) && reqA.tools.length === 1 && reqA.tools[0].name === "route_decision" && reqA.tool_choice.type === "auto" && !("temperature" in reqA), JSON.stringify(reqA?.tool_choice));
+  check("задача в запиті роутера в тегу <task>", /<task>\nзроби пост для X про тему від роутера/.test(reqA.messages[0].content[0].text));
+  check("план нічого не запустив: лише запит роутера, поле вводу порожнє", posts.length === beforeA + 1 && taskInput().value === "" && chains().length === cA);
+  const cardA = planCard();
+  check("картка плану: підсумок, три кроки, рецепт, впевненість, оцінка й ліміт", /Пост з дослідженням для X/.test(cardA.textContent) && [...cardA.querySelectorAll(".psteps li strong")].map((e) => e.textContent).join("|") === "Пошук|Пости|Перевірка" && /Рецепт «Пост з дослідженням»/.test(cardA.textContent) && /впевненість 0,92/.test(cardA.textContent) && /Оцінка до \$0,\d\d/.test(cardA.textContent) && /ліміт ланцюга \$0,25/.test(cardA.textContent) && /роутер/.test(cardA.textContent), cardA.textContent.slice(0, 260));
+  check("картка плану: кнопки «Запустити» і «Скасувати й змінити»", !!byText("section.plan button", "Запустити") && !!byText("section.plan button", "Скасувати й змінити"));
+
+  byText("section.plan button", "Скасувати й змінити").click(); await sleep(150);
+  check("скасування: задача повернулась у поле, картка позначена, запитів немає", taskInput().value === "зроби пост для X про тему від роутера з дослідженням" && /Скасовано/.test(planCard().textContent) && !byText("section.plan button", "Запустити") && posts.length === beforeA + 1, taskInput().value);
+
+  seq = [routerTurn({ summary: "Пост з дослідженням для X про тему від роутера", confidence: 0.92, steps: [], recipe: "post-research", recipeInput: "x: Тема від роутера" })];
+  q(".go").click();
+  await waitFor(() => qa("section.plan").length === 2 && !!byText("section.plan button", "Запустити"));
+  seq = chainSeq();
+  byText("section.plan button", "Запустити").click();
+  const doneA = await waitFor(() => chains().length === cA + 1 && /Готово/.test(chains().at(-1).textContent) && !q(".go.stop"), 10000);
+  check("підтверджений план виконується як ланцюг: заголовок рецепта, три кроки виконані", doneA && /Пост з дослідженням/.test(chains().at(-1).textContent) && /Тема від роутера/.test(chains().at(-1).textContent) && [...chains().at(-1).querySelectorAll(".csteps .cs.done")].length === 3, chains().at(-1)?.textContent);
+  check("після запуску картка плану без кнопок: «Запущено»", /Запущено/.test(planCard().textContent) && !byText("section.plan button", "Запустити"));
+  check("запити: роутер, потім пошук, пости, перевірка (6 запитів із паузою пошуку)", posts.length === beforeA + 1 + 1 + 4, String(posts.length - beforeA));
+
+  // Один агент: звичайний запуск (не ланцюг), задача для агента це інструкція роутера
+  const beforeB = posts.length;
+  const cB = chains().length;
+  seq = [routerTurn({ summary: "Скоротити текст", confidence: 0.88, steps: [{ agentId: "docs", instruction: "Скороти текст до двох речень" }] })];
+  await sendTask("скороти це");
+  await waitFor(() => qa("section.plan").length === 3);
+  check("план з одного агента: один крок без рецепта", [...planCard().querySelectorAll(".psteps li")].length === 1 && /Документи/.test(planCard().textContent) && !/Рецепт/.test(planCard().textContent), planCard()?.textContent.slice(0, 200));
+  seq = [textTurn];
+  byText("section.plan button", "Запустити").click();
+  await waitFor(() => posts.length === beforeB + 2 && !q(".go.stop"), 6000);
+  check("одинарний план запускає звичайного агента (не ланцюг) з інструкцією роутера", chains().length === cB && /Скороти текст до двох речень/.test(posts.at(-1).messages[0].content.at(-1).text) && !posts.at(-1).tools.some((t) => t.name === "route_decision"), String(chains().length - cB));
+  check("результат агента показано карткою після плану", qa(".task span").some((e) => /Скороти текст до двох речень/.test(e.textContent)) && /Готовий текст відповіді/.test(q("section[aria-label=\"Робота\"]").textContent));
+
+  // Низька впевненість і уточнення
+  seq = [routerTurn({ summary: "Щось із текстом", confidence: 0.45, steps: [{ agentId: "docs", instruction: "Зроби щось із текстом" }] })];
+  await sendTask("зроби з цим щось");
+  await waitFor(() => qa("section.plan").length === 4);
+  check("низька впевненість: попередження й кнопка «Запустити все одно»", /не певен/.test(planCard().textContent) && /впевненість 0,45/.test(planCard().textContent) && !!byText("section.plan button", "Запустити все одно"), planCard()?.textContent.slice(0, 200));
+  byText("section.plan button", "Скасувати й змінити").click(); await sleep(100);
+  seq = [routerTurn({ summary: "Бракує теми", confidence: 0.3, steps: [], clarify: "Про що має бути пост і для якої платформи?" })];
+  setVal(taskInput(), "зроби пост"); await sleep(40); q(".go").click();
+  await waitFor(() => qa("section.plan").length === 5);
+  check("уточнення: питання замість плану, без кнопки «Запустити»", /Потрібне уточнення/.test(planCard().textContent) && /Про що має бути пост/.test(planCard().textContent) && !byText("section.plan button", "Запустити") && !!byText("section.plan button", "Уточнити задачу"));
+  byText("section.plan button", "Уточнити задачу").click(); await sleep(100);
+  check("«Уточнити задачу» повертає текст у поле", taskInput().value === "зроби пост");
+  setVal(taskInput(), ""); await sleep(30);
+
+  // Помилка роутера: модель двічі не викликала інструмент
+  const beforeE = posts.length;
+  seq = [textTurn, textTurn];
+  await sendTask("щось незрозуміле");
+  const errShown = await waitFor(() => /Роутер не склав коректний план/.test(q("section[aria-label=\"Робота\"]").textContent));
+  check("помилка роутера: повідомлення, два запити (повтор), текст повернуто в поле", errShown && posts.length === beforeE + 2 && taskInput().value === "щось незрозуміле", String(posts.length - beforeE));
+  setVal(taskInput(), ""); await sleep(30);
+
+  // Команди й рецепти обходять роутер навіть у режимі «Авто»
+  const beforeC = posts.length;
+  seq = chainSeq();
+  await sendTask("Пост-з-пошуком X: Тема без роутера");
+  await waitFor(() => /Тема без роутера/.test(chains().at(-1)?.textContent ?? "") && /Готово/.test(chains().at(-1).textContent) && !q(".go.stop"), 10000);
+  check("рецепт у режимі «Авто» не викликає роутер (перший запит це пошук)", !posts.slice(beforeC).some((b) => b.tools?.some((t) => t.name === "route_decision")) && !!posts[beforeC].tools.find((t) => t.type === "web_search_20250305"));
+  const beforeD = posts.length;
+  seq = [textTurn];
+  await sendTask("/док скороти цей текст");
+  await waitFor(() => posts.length === beforeD + 1 && !q(".go.stop"), 6000);
+  check("команда агента обходить роутер і виводить із режиму «Авто»", !posts[beforeD].tools.some((t) => t.name === "route_decision") && !/Авто/.test(q(".agentbtn").getAttribute("aria-label")) && /Документи/.test(q(".agentbtn").getAttribute("aria-label")), q(".agentbtn")?.getAttribute("aria-label"));
+  setVal(taskInput(), ""); await sleep(30);
+
   // Імпорт бази: Пам'ять → імпорт пакета
   await tab("Параметри");
   check("параметри показують режим і адресу", /вкладка браузера · app\.test/.test(q("section[aria-label=Налаштування]").textContent), q("section[aria-label=Налаштування]").textContent.match(/Зараз:[^\n]*/)?.[0]);

@@ -143,14 +143,18 @@ export default function App() {
 
   if (!token) return <Gate onToken={setTokenState} />;
 
-  const head = staticHead(agent.name, agent.subtitle)[tab];
+  const head = { ...staticHead(agent.name, agent.subtitle)[tab] };
+  if (tab === "work" && session.auto) {
+    head.title = "Авто";
+    head.sub = "Роутер запропонує план, ви підтвердите";
+  }
   const screen = (id: Tab) => "screen" + (tab === id ? " on" : "");
   return (
     <div className="app">
       <header className="top">
         <div>
           {tab === "work" ? (
-            <button className="agentbtn" onClick={() => setAgentOpen(true)} aria-label={`Агент: ${agent.name}. Змінити`}>
+            <button className="agentbtn" onClick={() => setAgentOpen(true)} aria-label={`Агент: ${session.auto ? "Авто" : agent.name}. Змінити`}>
               <h1>{head.title}</h1>
               <Icon name="chevd" size={22} />
             </button>
@@ -159,7 +163,7 @@ export default function App() {
           )}
           <p>{head.sub}</p>
         </div>
-        {(tab === "work" || tab === "ctx") && <span className="pill">{agent.model}</span>}
+        {(tab === "work" || tab === "ctx") && <span className="pill">{tab === "work" && session.auto ? "fast" : agent.model}</span>}
       </header>
 
       <main>
@@ -206,7 +210,13 @@ export default function App() {
       <AgentSheet
         open={agentOpen}
         current={agent.id}
+        auto={session.auto}
         onClose={() => setAgentOpen(false)}
+        onPickAuto={() => {
+          setSession({ auto: true });
+          setAgentOpen(false);
+          toast("Авто: опишіть задачу, роутер запропонує план");
+        }}
         onPickRecipe={(r) => {
           // Команду підставляємо перед уже набраним текстом (платформа й тема лишаються), слеш не потрібен на клавіатурі.
           setSession((s) => {
@@ -218,7 +228,7 @@ export default function App() {
           (document.querySelector(".inrow input[type=text]") as HTMLInputElement | null)?.focus();
         }}
         onPick={(id) => {
-          setSession({ agentId: id });
+          setSession({ agentId: id, auto: false });
           setAgentOpen(false);
           toast(`Агент: ${getAgent(id).name}`);
         }}
