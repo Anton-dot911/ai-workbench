@@ -304,3 +304,14 @@ textarea.field { resize: vertical; line-height: 1.4; }
 .sub { display: grid; gap: 6px; padding: 0 8px 8px; }
 .item.nested { background: var(--raised); border-radius: 10px; }
 .pv > div + div { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; }
+
+/* Роутер: план на підтвердження */
+.plan { padding: 14px; }
+.plan .chead { flex-direction: row; justify-content: space-between; align-items: baseline; }
+.conf { font-size: 14px; color: var(--ink2); }
+.conf.low, .plan .warn { color: var(--bad); }
+.plan .warn { font-size: 14.5px; margin: 6px 0; }
+.psum { margin: 4px 0 8px; }
+.psteps { margin: 0 0 8px; padding-left: 22px; display: grid; gap: 6px; }
+.psteps li strong { display: block; }
+.psteps li span { color: var(--ink2); font-size: 14.5px; }

@@ -78,6 +78,8 @@ export interface ChainOptions {
   limitUsd?: number;
   /** Підпис ланцюга для журналу: рецепт і тема. Кожен запуск зберігає його разом із номером кроку. */
   label?: { recipe: string; topic: string };
+  /** Фрагмент користувача: отримує лише перший крок (наприклад, «Перевірка» вставленого тексту). */
+  selection?: string;
 }
 
 /** `stopped_steps`: доопрацювання не вмістилось у ліміт кроків ланцюга. */
@@ -140,6 +142,7 @@ export async function runChain(steps: ChainStep[], ui: ChainUi, opts: ChainOptio
     const label = KIND_LABEL[kind];
 
     const task: Task = { input: step.instruction, chainId };
+    if (i === 0 && opts.selection) task.selection = opts.selection;
     if (opts.label) task.chain = { ...opts.label, index: i, total: steps.length, ...(label ? { label } : {}) };
     if (i > 0) {
       const upstream = step.upstreamFrom ? step.upstreamFrom(done) : done[i - 1].text;
