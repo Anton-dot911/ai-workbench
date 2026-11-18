@@ -1,7 +1,7 @@
 import type { Usage } from "../../shared/pricing";
 
 export type ModelTier = "fast" | "balanced" | "deep";
-export type ArtifactType = "document" | "post" | "code" | "search_report" | "review" | "note";
+export type ArtifactType = "document" | "post" | "code" | "search_report" | "review" | "note" | "engineering_package";
 export type JSONSchema = Record<string, unknown>;
 
 export interface ToolDef {
