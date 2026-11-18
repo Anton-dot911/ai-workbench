@@ -30,7 +30,7 @@ const MemorySchema = z.object({
 
 const ArtifactSchema = z.object({
   id: Str.min(1),
-  type: z.enum(["document", "post", "code", "search_report", "review", "note"]),
+  type: z.enum(["document", "post", "code", "search_report", "review", "note", "engineering_package"]),
   title: Str,
   content: Str,
   summary: Str.optional(),
