@@ -80,7 +80,49 @@ export const postWithResearch: Recipe = {
   },
 };
 
-export const RECIPES: Recipe[] = [postWithResearch];
+/** Extract machine-readable validatePackage report. */
+function packageValidation(text: string): { errors: number; warnings: number } | null {
+  const clean = text.trim().replace(/^\x60\x60\x60(?:json)?\s*/i, "").replace(/\s*\x60\x60\x60$/, "");
+  try {
+    const value = JSON.parse(clean);
+    if (typeof value.errors === "number" && typeof value.warnings === "number") return value;
+  } catch { /* report may be embedded in prose */ }
+  const match = text.match(/(?:errors|помилок)\s*[:=]\s*(\d+)/i);
+  return match ? { errors: Number(match[1]), warnings: 0 } : null;
+}
+
+export const specificationPackage: Recipe = {
+  id: "specification-package",
+  name: "Пакет специфікацій",
+  description: "Вимоги → архітектура → модель даних → задачі → validatePackage; за помилок — виправлення й повторна перевірка.",
+  commands: ["/пакет-специфікацій", "/spec-package"],
+  examples: ["пакет-специфікацій: модуль імпорту бази", "spec-package: offline queue"],
+  build(input) {
+    const topic = input.trim();
+    if (!topic) throw new Error("Вкажіть проєкт або модуль для пакета специфікацій.");
+    const stages = [
+      `Проєкт/модуль: ${topic}. Створи пакет через create_package (якщо його ще немає; projectId kebab-case). Суттєві невідомі уточни через ask_user. Виконай лише set_requirements. Розрізняй confirmed, preference, assumption. Поверни packageId і короткий звіт.`,
+      `Продовж пакет ${topic}, packageId бери з <upstream>. Виконай лише set_architecture: межі, потоки, рішення, компоненти. Не змінюй вимоги. Поверни короткий звіт.`,
+      `Продовж пакет ${topic}, packageId бери з <upstream>. Виконай лише set_data_model, узгоджено з вимогами й архітектурою. Якщо дані не потрібні, entities=[] допустимо. Не змінюй інші розділи.`,
+      `Продовж пакет ${topic}, packageId бери з <upstream>. Виконай лише set_tasks: малі перевірювані задачі, покриття must-вимог, залежності, файли, acceptance і verification. Не змінюй інші розділи. Після цього виклич check_package. Поверни повний JSON-звіт check_package (errors, warnings, issues, readyForReview), без обрізання.`,
+    ];
+    const validation = `Виконай check_package для пакета ${topic}, нічого не змінюй. Поверни повний JSON-звіт (errors, warnings, issues, readyForReview).`;
+    const fix = `Пакет ${topic}: виправ за звітом у <upstream> всі помилки та warnings, що можна усунути без нових припущень. Стабільні ID не перенумеровуй, коректні розділи не переписуй. Виклич потрібні set_* інструменти, потім check_package. Поверни повний JSON-звіт.`;
+    return [
+      { agentId: "engineer", instruction: stages[0] },
+      { agentId: "engineer", instruction: stages[1] },
+      { agentId: "engineer", instruction: stages[2] },
+      { agentId: "engineer", instruction: stages[3] },
+      { agentId: "engineer", instruction: validation, retry: {
+        max: 1,
+        needed: (result) => (packageValidation(result.text)?.errors ?? 0) > 0,
+        fix: { agentId: "engineer", instruction: fix, upstreamFrom: (_done, trigger) => trigger.text },
+      } },
+    ];
+  },
+};
+
+\nexport const RECIPES: Recipe[] = [postWithResearch, specificationPackage];
 
 export const getRecipe = (id: string): Recipe | undefined => RECIPES.find((r) => r.id === id);
 
