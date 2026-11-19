@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
 
-import { parseRecipeCommand, postWithResearch, splitPlatform } from "../src/agents/recipes.js";
+import { parseRecipeCommand, postWithResearch, specificationPackage, splitPlatform } from "../src/agents/recipes.js";
 import { resolveContext } from "../src/core/contextBuilder.js";
 import { searchAgent } from "../src/agents/search.js";
 import { DEFAULT_CHAIN_LIMIT_USD, MAX_CHAIN_STEPS, MAX_RETRIES, runChain, type ChainStep, type ChainUi } from "../src/core/orchestrator.js";
@@ -288,7 +288,21 @@ const reviewNeeds = () => sse([start(), ...toolBlock(0, "toolu_rn", "submit_revi
 const postsFixed = () => sse([start(), ...toolBlock(0, "toolu_pf", "submit_posts", FIXED), ...end("tool_use")]);
 const OLD_POST = POSTS.variants[0].text;
 
-test("retry: needs_changes → виправлення постів за зауваженнями → повторна перевірка виправленого тексту", async () => {
+
+test("recipe: specification package has ordered engineering stages and one validatePackage retry", () => {
+  const steps = specificationPackage.build("модуль імпорту бази");
+  assert.deepEqual(steps.map((s) => s.agentId), ["engineer", "engineer", "engineer", "engineer", "engineer"]);
+  assert.match(steps[0].instruction, /set_requirements/);
+  assert.match(steps[1].instruction, /set_architecture/);
+  assert.match(steps[2].instruction, /set_data_model/);
+  assert.match(steps[3].instruction, /set_tasks[\s\S]*check_package/);
+  assert.match(steps[4].instruction, /check_package/);
+  assert.equal(steps[4].retry?.max, 1);
+  assert.equal(steps[4].retry?.fix.agentId, "engineer");
+  assert.equal(steps[4].retry?.needed({ text: JSON.stringify({ errors: 2, warnings: 0 }) } as any), true);
+  assert.equal(steps[4].retry?.needed({ text: JSON.stringify({ errors: 0, warnings: 2 }) } as any), false);
+});
+\ntest("retry: needs_changes → виправлення постів за зауваженнями → повторна перевірка виправленого тексту", async () => {
   mock([searchTurn(), postsTurn(), reviewNeeds(), postsFixed(), reviewTurn()]);
   const metas: string[] = [];
   const res = await runChain(
