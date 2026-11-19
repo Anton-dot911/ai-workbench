@@ -6,6 +6,7 @@ import { getSession, setSession } from "../core/session";
 import type { ToolDef } from "../core/types";
 import { addProposal, db, proposalDuplicate } from "../db/db";
 import { applyEdits, countOccurrences, isReplace, type Edit } from "./edits";
+import { ENGINEERING_HANDLERS } from "./engineering";
 import type { EditPreview, ToolHandler } from "./types";
 
 const clip = (s: string, max = 30_000): string => (s.length > max ? s.slice(0, max) + "\n[…відповідь обрізано…]" : s);
@@ -458,3 +459,4 @@ const handoffTool: ToolHandler = {
 TOOL_HANDLERS[handoffTool.def.name] = handoffTool;
 TOOL_HANDLERS[submitReview.def.name] = submitReview;
 TOOL_HANDLERS[submitPosts.def.name] = submitPosts;
+for (const h of ENGINEERING_HANDLERS) TOOL_HANDLERS[h.def.name] = h;

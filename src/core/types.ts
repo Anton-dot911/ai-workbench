@@ -41,6 +41,8 @@ export interface AgentManifest {
   examples: string[];
   /** Кому цей агент може передавати завдання інструментом `handoff` (лише так, і лише з підтвердженням). */
   handoffTo?: string[];
+  /** Ліміт кроків циклу tool use для цього агента (за замовчуванням `MAX_STEPS`, не більше `MAX_STEPS_HARD`). */
+  maxSteps?: number;
 }
 
 export type Tier = "stable" | "relevant" | "operative";
