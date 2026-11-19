@@ -17,17 +17,19 @@ import { LibraryScreen } from "./screens/LibraryScreen";
 import { MemoryScreen } from "./screens/MemoryScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { WorkScreen } from "./screens/WorkScreen";
+import { PackageScreen } from "./screens/PackageScreen";
 import { AgentSheet } from "./ui/AgentSheet";
 import { Icon, type IconName } from "./ui/Icon";
 import { Toaster, toast } from "./ui/toast";
 
-type Tab = "work" | "ctx" | "library" | "memory" | "settings";
+type Tab = "work" | "ctx" | "library" | "packages" | "memory" | "settings";
 
 // Підпис «Параметри» замість «Налаштування»: п'ять вкладок на 375 pt не вміщують довге слово.
 const TABS: { id: Tab; label: string; icon: IconName }[] = [
   { id: "work", label: "Робота", icon: "tWork" },
   { id: "ctx", label: "Контекст", icon: "tCtx" },
   { id: "library", label: "Бібліотека", icon: "tLib" },
+  { id: "packages", label: "Пакети", icon: "tLib" },
   { id: "memory", label: "Пам'ять", icon: "tMem" },
   { id: "settings", label: "Параметри", icon: "tSet" },
 ];
@@ -36,6 +38,7 @@ const staticHead = (name: string, sub: string): Record<Tab, { title: string; sub
   work: { title: name, sub },
   ctx: { title: "Контекст запуску", sub: `Що отримає «${name}»` },
   library: { title: "Бібліотека", sub: "Збережені результати й журнал запусків" },
+  packages: { title: "Пакети", sub: "Специфікації, перевірка та затвердження" },
   memory: { title: "Пам'ять", sub: "Профіль і факти для всіх агентів" },
   settings: { title: "Налаштування", sub: "Витрати, дані, доступ" },
 });
@@ -188,6 +191,7 @@ export default function App() {
         <section className={screen("library")} aria-label="Бібліотека">
           <LibraryScreen />
         </section>
+        <section className={screen("packages")} aria-label="Пакети"><PackageScreen /></section>
         <section className={screen("memory")} aria-label="Пам'ять">
           <MemoryScreen offer={offerDismissed ? null : offer} health={health} onRestore={restoreFromOffer} onDismissOffer={() => setOfferDismissed(true)} />
         </section>
