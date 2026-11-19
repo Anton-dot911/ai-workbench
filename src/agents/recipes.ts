@@ -104,7 +104,7 @@ export const specificationPackage: Recipe = {
       `Проєкт/модуль: ${topic}. Створи пакет через create_package (якщо його ще немає; projectId kebab-case). Суттєві невідомі уточни через ask_user. Виконай лише set_requirements. Розрізняй confirmed, preference, assumption. Поверни packageId і короткий звіт.`,
       `Продовж пакет ${topic}, packageId бери з <upstream>. Виконай лише set_architecture: межі, потоки, рішення, компоненти. Не змінюй вимоги. Поверни короткий звіт.`,
       `Продовж пакет ${topic}, packageId бери з <upstream>. Виконай лише set_data_model, узгоджено з вимогами й архітектурою. Якщо дані не потрібні, entities=[] допустимо. Не змінюй інші розділи.`,
-      `Продовж пакет ${topic}, packageId бери з <upstream>. Виконай лише set_tasks: малі перевірювані задачі, покриття must-вимог, залежності, файли, acceptance і verification. Не змінюй інші розділи. Після цього виклич check_package. Поверни повний JSON-звіт check_package (errors, warnings, issues, readyForReview), без обрізання.`,
+      `Продовж пакет ${topic}, packageId бери з <upstream>. Виконай лише set_tasks: малі перевірювані задачі, покриття must-вимог, залежності, файли, acceptance і verification. Не змінюй інші розділи. Поверни короткий звіт про створені задачі.`,
     ];
     const validation = `Виконай check_package для пакета ${topic}, нічого не змінюй. Поверни повний JSON-звіт (errors, warnings, issues, readyForReview).`;
     const fix = `Пакет ${topic}: виправ за звітом у <upstream> всі помилки та warnings, що можна усунути без нових припущень. Стабільні ID не перенумеровуй, коректні розділи не переписуй. Виклич потрібні set_* інструменти, потім check_package. Поверни повний JSON-звіт.`;
