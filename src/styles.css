@@ -315,3 +315,13 @@ textarea.field { resize: vertical; line-height: 1.4; }
 .psteps { margin: 0 0 8px; padding-left: 22px; display: grid; gap: 6px; }
 .psteps li strong { display: block; }
 .psteps li span { color: var(--ink2); font-size: 14.5px; }
+
+/* Engineering package review screen */
+.package-screen { padding-bottom: 16px; }
+.package-screen .field-label { display:block; margin: 8px 0; color:var(--ink2); }
+.package-screen select { width:100%; margin:6px 0 12px; padding:10px; border-radius:10px; background:var(--raised); color:var(--ink); border:1px solid var(--line); }
+.package-screen .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+.package-screen .actions button { border:1px solid var(--line); border-radius:10px; padding:10px 12px; background:var(--raised); color:var(--ink); }
+.package-screen .issue, .package-screen .trace { border-top:1px solid var(--line); padding:10px 0; overflow-wrap:anywhere; }
+.package-screen .issue p, .package-screen .trace p { margin:5px 0; color:var(--ink2); }
+.package-screen .package-doc { white-space:pre-wrap; overflow-wrap:anywhere; max-height:55vh; overflow:auto; padding:12px; background:var(--raised); border-radius:10px; font:14px/1.5 var(--read); }
