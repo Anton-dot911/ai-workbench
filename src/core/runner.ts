@@ -37,6 +37,8 @@ export interface RunResult {
 
 /** Запобіжник від нескінченного циклу «модель → інструмент → модель». */
 export const MAX_STEPS = 12;
+/** Верхня межа, яку може запросити маніфест агента (агенти з довгим робочим процесом, наприклад «Інженер»). */
+export const MAX_STEPS_HARD = 30;
 
 /** Пакет контексту розкладається так, щоб стабільна частина йшла першою і кешувалась (prompt caching). */
 export function buildRequest(agent: AgentManifest, ctx: ContextPacket, task: Task): MessageRequest {
@@ -149,7 +151,8 @@ export async function runAgent(agent: AgentManifest, task: Task, ui: RunUi, opts
   let stopReason: string | null = null;
   let steps = 0;
 
-  while (steps < MAX_STEPS) {
+  const maxSteps = Math.min(Math.max(agent.maxSteps ?? MAX_STEPS, 1), MAX_STEPS_HARD);
+  while (steps < maxSteps) {
     if (ui.signal?.aborted) throw new ApiError("aborted", "Зупинено");
     steps++;
     const res = await streamMessage({ ...req, messages }, {
@@ -185,7 +188,7 @@ export async function runAgent(agent: AgentManifest, task: Task, ui: RunUi, opts
     // Серверний інструмент не вклався в один запит: повертаємо відповідь без змін і продовжуємо.
     if (res.stopReason === "pause_turn") {
       messages.push({ role: "assistant", content: res.content.filter((b) => b.type !== "text" || (b.text ?? "").length > 0) });
-      if (steps >= MAX_STEPS) throw new Error(`Агент перевищив ліміт кроків (${MAX_STEPS}). Спробуйте уточнити задачу.`);
+      if (steps >= maxSteps) throw new Error(`Агент перевищив ліміт кроків (${maxSteps}). Спробуйте уточнити задачу.`);
       continue;
     }
 
@@ -204,8 +207,8 @@ export async function runAgent(agent: AgentManifest, task: Task, ui: RunUi, opts
         role: "user",
         content: `Потрібно завершити задачу викликом інструмента ${agent.finalTool}. Передай через нього результат відповідно до його схеми. Не завершуй звичайним текстом.`,
       });
-      if (steps >= MAX_STEPS) {
-        throw new Error(`Модель не викликала обов\u0027язковий інструмент ${agent.finalTool} після ${MAX_STEPS} кроків.`);
+      if (steps >= maxSteps) {
+        throw new Error(`Модель не викликала обов\u0027язковий інструмент ${agent.finalTool} після ${maxSteps} кроків.`);
       }
       continue;
     }
@@ -232,7 +235,7 @@ export async function runAgent(agent: AgentManifest, task: Task, ui: RunUi, opts
       stopReason = "end_turn";
       break;
     }
-    if (steps >= MAX_STEPS) throw new Error(`Агент перевищив ліміт кроків (${MAX_STEPS}). Спробуйте уточнити задачу.`);
+    if (steps >= maxSteps) throw new Error(`Агент перевищив ліміт кроків (${maxSteps}). Спробуйте уточнити задачу.`);
   }
 
   // Для агентів із веб-пошуком відповідь збирається з блоків із маркерами цитат; інакше це накопичений потік.

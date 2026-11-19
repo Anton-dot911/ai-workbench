@@ -570,6 +570,24 @@ const check = (name, cond, extra = "") => { console.log((cond ? "PASS" : "FAIL")
   check("відмова: вкладеного запиту немає, агент отримує is_error і продовжує", declined && resD.is_error === true && posts.length === beforeR2 + 2, String(posts.length - beforeR2));
   setVal(taskInput(), ""); await sleep(30);
 
+  // «Інженер» (T5.2): агент у шторці, команда, запит із інструментами пакета без затвердження
+  await tab("Робота");
+  q(".agentbtn").click(); await sleep(100);
+  const eng = qa(".sheet.on .agent").find((e) => /Інженер/.test(e.textContent));
+  check("шторка агентів: «Інженер» з описом проєктування й командою", !!eng && /Вимоги, архітектура/.test(eng.textContent) === false && /Проєктує програмний модуль/.test(eng.textContent) && /\/інженер/.test(eng.textContent), eng?.textContent.slice(0, 200));
+  eng.click(); await sleep(120);
+  check("обрано «Інженер»: заголовок і приклади в підказці", /Інженер/.test(q(".agentbtn").getAttribute("aria-label")));
+  const beforeEng = posts.length;
+  seq = [textTurn];
+  setVal(taskInput(), "Спроєктуй модуль імпорту бази"); await sleep(60); q(".go").click();
+  await waitFor(() => posts.length === beforeEng + 1 && !q(".go.stop"), 6000);
+  const engTools = posts[beforeEng].tools.map((t) => t.name);
+  check("запит «Інженера»: інструменти пакета й handoff до пошуку, але без затвердження чи довільного збереження", ["create_package", "set_requirements", "set_architecture", "set_data_model", "set_tasks", "set_open_questions", "check_package", "request_review", "handoff", "read_artifact", "search_context"].every((n) => engTools.includes(n)) && !engTools.some((n) => /approve|save_artifact|apply_edits/.test(n)), engTools.join(","));
+  check("«Інженер»: без примусового tool_choice й без temperature, великий ліміт виходу для розділів", (!posts[beforeEng].tool_choice || posts[beforeEng].tool_choice.type === "auto") && !("temperature" in posts[beforeEng]) && posts[beforeEng].max_tokens >= 8000, String(posts[beforeEng].max_tokens));
+  setVal(taskInput(), ""); await sleep(30);
+  q(".agentbtn").click(); await sleep(100);
+  byText(".sheet.on .agent", "Документи").click(); await sleep(120);
+
   // Імпорт бази: Пам'ять → імпорт пакета
   await tab("Параметри");
   check("параметри показують режим і адресу", /вкладка браузера · app\.test/.test(q("section[aria-label=Налаштування]").textContent), q("section[aria-label=Налаштування]").textContent.match(/Зараз:[^\n]*/)?.[0]);
