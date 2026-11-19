@@ -122,7 +122,7 @@ export const specificationPackage: Recipe = {
   },
 };
 
-\nexport const RECIPES: Recipe[] = [postWithResearch, specificationPackage];
+export const RECIPES: Recipe[] = [postWithResearch, specificationPackage];
 
 export const getRecipe = (id: string): Recipe | undefined => RECIPES.find((r) => r.id === id);
 
