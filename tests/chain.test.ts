@@ -302,7 +302,7 @@ test("recipe: specification package has ordered engineering stages and one valid
   assert.equal(steps[4].retry?.needed({ text: JSON.stringify({ errors: 2, warnings: 0 }) } as any), true);
   assert.equal(steps[4].retry?.needed({ text: JSON.stringify({ errors: 0, warnings: 2 }) } as any), false);
 });
-\ntest("retry: needs_changes → виправлення постів за зауваженнями → повторна перевірка виправленого тексту", async () => {
+test("retry: needs_changes → виправлення постів за зауваженнями → повторна перевірка виправленого тексту", async () => {
   mock([searchTurn(), postsTurn(), reviewNeeds(), postsFixed(), reviewTurn()]);
   const metas: string[] = [];
   const res = await runChain(
