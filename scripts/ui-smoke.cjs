@@ -8,7 +8,10 @@ const { webcrypto } = require("crypto");
 
 const dist = proj + "/dist";
 const html = fs.readFileSync(dist + "/index.html", "utf8").replace(/<script[^>]*><\/script>/g, "");
-const bundle = fs.readFileSync(dist + "/assets/" + fs.readdirSync(dist + "/assets").find((f) => f.endsWith(".js")), "utf8");
+// Головний бандл це скрипт, на який посилається index.html (після розділення коду в assets є кілька .js, наприклад чанк PDF.js).
+const mainScript = /src="\/assets\/([^"]+\.js)"/.exec(fs.readFileSync(dist + "/index.html", "utf8"));
+if (!mainScript) throw new Error("index.html не посилається на головний бандл у /assets");
+const bundle = fs.readFileSync(dist + "/assets/" + mainScript[1], "utf8");
 
 const errors = [];
 const dom = new JSDOM(html, { url: "https://app.test/", pretendToBeVisual: true, runScripts: "outside-only" });
@@ -108,7 +111,8 @@ const check = (name, cond, extra = "") => { console.log((cond ? "PASS" : "FAIL")
 (async () => {
   w.eval(bundle);
   await sleep(400);
-  check("5 вкладок", qa(".tab").length === 5, qa(".tab").map((t) => t.textContent).join(" | "));
+  check("головний бандл без PDF.js (підвантажується лише при імпорті PDF)", !/GlobalWorkerOptions|getDocument\(/.test(bundle) && bundle.length < 1_400_000, String(bundle.length));
+  check("6 вкладок, зокрема «Пакети» (T5.4)", qa(".tab").length === 6 && qa(".tab").map((t) => t.textContent.trim()).join("|").includes("Бібліотека|Пакети|Пам'ять"), qa(".tab").map((t) => t.textContent).join(" | "));
   check("початковий екран «Документи»", q(".top h1").textContent === "Документи");
 
   // Пам'ять: додати закріплений факт

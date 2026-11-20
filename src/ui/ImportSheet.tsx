@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { describeBundle, importBundle, parseBundle } from "../db/importexport";
 import { db, saveTextArtifact } from "../db/db";
-import { extractPdfText } from "../db/documentImport";
 import { Icon } from "./Icon";
 import { Sheet } from "./Sheet";
 import { toast } from "./toast";
@@ -40,6 +39,8 @@ function ImportBody({ onClose }: { onClose: () => void }) {
         let content = "";
         let pages: number | undefined;
         if (ext === "pdf") {
+          // PDF.js важкий (≈1 МБ) і містить import.meta: підвантажується лише коли справді вибрано PDF, а не в головному бандлі.
+          const { extractPdfText } = await import("../db/documentImport");
           const result = await extractPdfText(file);
           content = result.text;
           pages = result.pages;

@@ -8,7 +8,10 @@ const { webcrypto } = require("crypto");
 
 const dist = proj + "/dist";
 const html = fs.readFileSync(dist + "/index.html", "utf8").replace(/<script[^>]*><\/script>/g, "");
-const bundle = fs.readFileSync(dist + "/assets/" + fs.readdirSync(dist + "/assets").find((f) => f.endsWith(".js")), "utf8");
+// Головний бандл це скрипт, на який посилається index.html (після розділення коду в assets є кілька .js, наприклад чанк PDF.js).
+const mainScript = /src="\/assets\/([^"]+\.js)"/.exec(fs.readFileSync(dist + "/index.html", "utf8"));
+if (!mainScript) throw new Error("index.html не посилається на головний бандл у /assets");
+const bundle = fs.readFileSync(dist + "/assets/" + mainScript[1], "utf8");
 
 const errors = [];
 const dom = new JSDOM(html, { url: "https://app.test/", pretendToBeVisual: true, runScripts: "outside-only" });

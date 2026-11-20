@@ -295,7 +295,8 @@ test("recipe: specification package has ordered engineering stages and one valid
   assert.match(steps[0].instruction, /set_requirements/);
   assert.match(steps[1].instruction, /set_architecture/);
   assert.match(steps[2].instruction, /set_data_model/);
-  assert.match(steps[3].instruction, /set_tasks[\s\S]*check_package/);
+  assert.match(steps[3].instruction, /set_tasks/);
+  assert.doesNotMatch(steps[3].instruction, /check_package/, "етап задач не дублює валідацію: її робить окремий крок");
   assert.match(steps[4].instruction, /check_package/);
   assert.equal(steps[4].retry?.max, 1);
   assert.equal(steps[4].retry?.fix.agentId, "engineer");
