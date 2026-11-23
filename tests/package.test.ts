@@ -261,6 +261,17 @@ test("документи: чотири файли пакета відтворю�
   assert.equal(tasks.tasks.length, 3);
 });
 
+test("документи: чернетка з циклом залежностей не ламає перегляд (порядок замінено переліком і описом помилки)", () => {
+  const p = clone(importPackage());
+  p.tasks[0].dependsOn = ["TASK-003"];
+  const d = renderDocuments(p);
+  const tasks = JSON.parse(d["TASKS.json"]);
+  assert.deepEqual(tasks.order, ["TASK-001", "TASK-002", "TASK-003"], "перелік у заданому порядку");
+  assert.match(tasks.orderError, /Цикл залежностей задач/);
+  assert.equal(tasks.tasks.length, 3);
+  assert.equal(JSON.parse(renderDocuments(importPackage())["TASKS.json"]).orderError, undefined, "без циклу помилки немає");
+});
+
 // ---------- сховище ----------
 test("сховище: пакет зберігається як артефакт engineering_package, чернетку можна змінювати з історією версій", async () => {
   const draft = importPackage();
