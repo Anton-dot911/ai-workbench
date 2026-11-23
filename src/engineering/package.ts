@@ -333,6 +333,15 @@ export function traceability(pkg: EngineeringPackage): TraceRow[] {
 
 // ---------- документи ----------
 
+/** TASKS.json: порядок виконання й задачі. Чернетка з циклом залежностей не ламає перегляд: порядок замінюється переліком задач і описом помилки. */
+function tasksDocument(pkg: EngineeringPackage): { order: string[]; orderError?: string; tasks: TaskSpec[] } {
+  try {
+    return { order: taskOrder(pkg).map((t) => t.id), tasks: pkg.tasks };
+  } catch (e) {
+    return { order: pkg.tasks.map((t) => t.id), orderError: e instanceof Error ? e.message : String(e), tasks: pkg.tasks };
+  }
+}
+
 /** Відтворює документи пакета з даних (для перегляду й передачі кодеру). */
 export function renderDocuments(pkg: EngineeringPackage): Record<string, string> {
   const head = `Пакет ${pkg.projectId} · версія ${pkg.version} · ${pkg.status}`;
@@ -356,6 +365,6 @@ export function renderDocuments(pkg: EngineeringPackage): Record<string, string>
     "REQUIREMENTS.md": requirements,
     "ARCHITECTURE.md": architecture,
     "DATA_MODEL.json": JSON.stringify(pkg.dataModel, null, 2),
-    "TASKS.json": JSON.stringify({ order: taskOrder(pkg).map((t) => t.id), tasks: pkg.tasks }, null, 2),
+    "TASKS.json": JSON.stringify(tasksDocument(pkg), null, 2),
   };
 }

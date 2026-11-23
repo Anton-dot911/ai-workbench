@@ -592,6 +592,81 @@ const check = (name, cond, extra = "") => { console.log((cond ? "PASS" : "FAIL")
   q(".agentbtn").click(); await sleep(100);
   byText(".sheet.on .agent", "Документи").click(); await sleep(120);
 
+  // T5.5: репетиція повного шляху «імпорт бази»: /пакет-специфікацій → пакет у «Пакети» → перегляд → затвердження → нова версія
+  await tab("Робота");
+  w.localStorage.setItem("wb.chainLimit", "1");
+  const REQS_S = [
+    { id: "REQ-001", title: "Імпорт лише додає", description: "Не видаляє й не перезаписує наявні записи.", priority: "must", kind: "confirmed", acceptance: [{ text: "Наявні факти після імпорту не змінились", verification: "test" }] },
+    { id: "REQ-002", title: "Без дублів", description: "Повторний імпорт нічого не додає.", priority: "must", kind: "confirmed", acceptance: [{ text: "Другий імпорт додає 0 записів", verification: "test" }] },
+  ];
+  const COMPS_S = [
+    { id: "COMP-001", name: "Схема імпорту", purpose: "Перевіряє форму файлу.", responsibilities: ["Відхиляти невалідні записи"], inputs: ["JSON"], outputs: ["Перевірені записи"], dependsOn: [], errors: ["Невалідний JSON"] },
+    { id: "COMP-002", name: "Імпортер", purpose: "Додає записи.", responsibilities: ["Пропускати дублі"], inputs: ["Перевірені записи"], outputs: ["Звіт імпорту"], dependsOn: ["COMP-001"], errors: [] },
+  ];
+  const ENTS_S = [{ id: "ENT-001", name: "MemoryItem", description: "Факт пам'яті", fields: [{ name: "id", type: "string", required: true }, { name: "text", type: "string", required: true }], relations: [] }];
+  const TASKS_S = [
+    { id: "TASK-001", title: "Схема файлу імпорту", description: "zod-схема.", requirements: ["REQ-001"], components: ["COMP-001"], dependsOn: [], files: ["src/db/importexport.ts"], acceptance: ["Невалідний запис відхиляється"], verification: "npm run check" },
+    { id: "TASK-002", title: "Додавання без дублів", description: "Додає відсутні записи.", requirements: ["REQ-001", "REQ-002"], components: ["COMP-002"], dependsOn: ["TASK-001"], files: ["src/db/importexport.ts"], acceptance: ["Повторний імпорт додає 0"], verification: "tests/importexport.test.ts" },
+  ];
+  const textWith = (text) => () => sse([
+    { type: "message_start", message: { usage: { input_tokens: 500, output_tokens: 1 } } },
+    { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+    { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } },
+    { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 20 } },
+  ]);
+  const beforeP = posts.length;
+  const findPkgId = () => {
+    for (const b of posts.slice(beforeP)) for (const m of b.messages) if (Array.isArray(m.content)) for (const c of m.content) if (c.type === "tool_result" && typeof c.content === "string") { try { const j = JSON.parse(c.content); if (j.packageId) return j.packageId; } catch {} }
+    return "";
+  };
+  let pkgId = "";
+  const stage = (name, input) => () => toolTurn({ name, input: typeof input === "function" ? input() : input });
+  seq = [
+    stage("create_package", { projectId: "workbench-import", summary: "Імпорт бази: лише додає, без дублів (README @645d443)." }),
+    stage("set_requirements", () => ({ packageId: (pkgId = findPkgId()), requirements: REQS_S })),
+    () => textWith(`packageId: ${pkgId}. Вимоги збережено.`)(),
+    stage("set_architecture", () => ({ packageId: pkgId, architecture: "Імпорт читає файл експорту, перевіряє схемою й додає лише відсутні записи в Dexie.", components: COMPS_S })),
+    textWith("Архітектуру збережено."),
+    stage("set_data_model", () => ({ packageId: pkgId, entities: ENTS_S })),
+    textWith("Модель даних збережено."),
+    stage("set_tasks", () => ({ packageId: pkgId, tasks: TASKS_S })),
+    textWith("Задачі збережено."),
+    stage("check_package", () => ({ packageId: pkgId })),
+    textWith('{"status":"DRAFT","version":"1.0","readyForReview":true,"errors":0,"warnings":0,"issues":[]}'),
+  ];
+  const cP = chains().length;
+  await runChainCmd("/пакет-специфікацій модуль імпорту бази");
+  const doneP2 = await waitFor(() => chains().length === cP + 1 && /Готово/.test(chains().at(-1).textContent) && !q(".go.stop"), 15000);
+  const barP = chains().at(-1);
+  check("рецепт «Пакет специфікацій»: заголовок і п'ять кроків «Інженера» виконано", doneP2 && /Пакет специфікацій/.test(barP.textContent) && [...barP.querySelectorAll(".csteps .cs.done")].length === 5, barP?.textContent.slice(0, 160));
+  check("11 запитів: створення, вимоги, архітектура, модель даних, задачі, перевірка (кожен етап окремим кроком)", posts.length === beforeP + 11, String(posts.length - beforeP));
+  const stageText = (i) => posts[beforeP + i].messages[0].content.at(-1).text;
+  check("інструкції етапів по порядку: set_requirements → set_architecture → set_data_model → set_tasks → check_package", /set_requirements/.test(stageText(0)) && /set_architecture/.test(stageText(3)) && /set_data_model/.test(stageText(5)) && /set_tasks/.test(stageText(7)) && /check_package/.test(stageText(9)));
+  check("packageId передається між етапами через upstream", !!pkgId && uptext(posts[beforeP + 3]).includes(pkgId) && uptext(posts[beforeP + 5]).includes(pkgId) && uptext(posts[beforeP + 7]).includes(pkgId), pkgId);
+  check("жоден запит рецепта не викликав затвердження чи request_review", !posts.slice(beforeP).some((b) => b.messages.some((m) => Array.isArray(m.content) && m.content.some((c) => c.type === "tool_use" && /approve|request_review/.test(c.name)))));
+
+  await tab("Пакети"); await sleep(200);
+  const pkgScreen = () => q(".package-screen");
+  check("екран «Пакети» одразу показує створений пакет у статусі «Чернетка»", !!pkgScreen() && /workbench-import · v1\.0 · Чернетка/.test(pkgScreen().textContent), pkgScreen()?.textContent.slice(0, 200));
+  check("картка пакета: лічильники вимог, компонентів, сутностей і задач", /2 вимог · 2 компонентів · 1 сутностей · 2 задач/.test(pkgScreen().textContent));
+  check("перевірка пакета без помилок", /Помилки: 0/.test(pkgScreen().textContent));
+  check("документи пакета: REQUIREMENTS.md показує вимоги з ідентифікаторами й критеріями", /REQ-001 · Імпорт лише додає/.test(pkgScreen().textContent) && /\[test\] Наявні факти після імпорту не змінились/.test(pkgScreen().textContent));
+  check("трасування: вимога → компоненти й задачі", /REQ-002 · Без дублів[\s\S]*Задачі: TASK-002/.test(pkgScreen().textContent));
+  const pkgBtn = (t) => qa(".package-screen button").find((b) => b.textContent.trim() === t);
+  check("у чернетці доступне «На перегляд», але не «Затвердити»", !!pkgBtn("На перегляд") && !pkgBtn("Затвердити") && !pkgBtn("Нова версія"));
+  pkgBtn("На перегляд").click(); await sleep(250);
+  check("«На перегляд» → статус «На перегляді», з'являються «Затвердити» і «Повернути»", /На перегляді/.test(pkgScreen().textContent) && !!pkgBtn("Затвердити") && !!pkgBtn("Повернути"), pkgScreen()?.textContent.slice(0, 120));
+  pkgBtn("Затвердити").click(); await sleep(250);
+  check("«Затвердити» (дія користувача) → «Затверджено»; лишається лише «Нова версія»", /Затверджено/.test(pkgScreen().textContent) && !pkgBtn("Затвердити") && !pkgBtn("На перегляд") && !!pkgBtn("Нова версія"));
+  pkgBtn("Нова версія").click(); await sleep(250);
+  check("«Нова версія» → v1.1 у статусі «Чернетка» з тим самим змістом", /workbench-import · v1\.1 · Чернетка/.test(pkgScreen().textContent) && /2 вимог · 2 компонентів · 1 сутностей · 2 задач/.test(pkgScreen().textContent), pkgScreen()?.textContent.slice(0, 120));
+  await tab("Бібліотека"); byText(".seg button", "Артефакти").click(); await sleep(150);
+  const libText = q("section[aria-label=\"Бібліотека\"]")?.textContent ?? w.document.body.textContent;
+  check("бібліотека зберігає обидві версії окремими записами: v1.0 затверджена, v1.1 чернетка", /Пакет: workbench-import v1\.0 · APPROVED/.test(libText) && /Пакет: workbench-import v1\.1 · DRAFT/.test(libText), libText.slice(0, 200));
+  w.localStorage.removeItem("wb.chainLimit");
+  await tab("Робота");
+  setVal(taskInput(), ""); await sleep(30);
+
   // Імпорт бази: Пам'ять → імпорт пакета
   await tab("Параметри");
   check("параметри показують режим і адресу", /вкладка браузера · app\.test/.test(q("section[aria-label=Налаштування]").textContent), q("section[aria-label=Налаштування]").textContent.match(/Зараз:[^\n]*/)?.[0]);
