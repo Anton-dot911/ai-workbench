@@ -22,6 +22,7 @@ import { GateSheet, type GateRequest } from "../ui/GateSheet";
 import { Icon } from "../ui/Icon";
 import type { HandoffRequest } from "../tools/types";
 import { PlanCard, type PlanView } from "../ui/PlanCard";
+import { applyToolEvent, settleTools } from "../ui/toolChips";
 import { PostCard } from "../ui/PostCard";
 import { ReviewCard } from "../ui/ReviewCard";
 import { SourceList } from "../ui/SourceList";
@@ -192,13 +193,7 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
         token,
         signal: ac.signal,
         onText: (d) => patch(id, (i) => ({ output: i.output + d })),
-        onTool: (e) =>
-          patch(id, (i) => ({
-            tools:
-              e.status === "start"
-                ? [...i.tools, { name: e.name, status: "start", detail: e.detail }]
-                : i.tools.map((t, k) => (k === i.tools.length - 1 && t.name === e.name ? { ...t, status: e.status, ...(e.detail ? { detail: e.detail } : {}) } : t)),
-          })),
+        onTool: (e) => patch(id, (i) => ({ tools: applyToolEvent(i.tools, e) })),
         confirm: (req) => new Promise<ConfirmDecision>((resolve) => setPending({ kind: "confirm", req, resolve })),
         ask: (req) => new Promise<string>((resolve) => setPending({ kind: "ask", req, resolve })),
         confirmHandoff,
@@ -293,8 +288,9 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
 
   /** Завершення запуску: підсумок, джерела, вартість; пропозиції пам'яті від агента. Спільне для одиночного запуску й кроків ланцюга. */
   function finishItem(id: string, ag: AgentManifest, run: Run, out: string, stopReason: string | null) {
-    patch(id, () => ({
+    patch(id, (i) => ({
       status: "done",
+      tools: settleTools(i.tools),
       // Агент зі структурованим виходом: показуємо результат завершального інструмента, а не вступний текст.
       ...(ag.finalTool || ag.serverTools?.length ? { output: out } : {}),
       links: run.sources,
@@ -351,13 +347,7 @@ export function WorkScreen({ token, resolved, onAuthError, onSpent, onOpenContex
           token,
           signal: ac.signal,
           onText: (d) => patch(cur, (i) => ({ output: i.output + d })),
-          onTool: (e) =>
-            patch(cur, (i) => ({
-              tools:
-                e.status === "start"
-                  ? [...i.tools, { name: e.name, status: "start", detail: e.detail }]
-                  : i.tools.map((t, k) => (k === i.tools.length - 1 && t.name === e.name ? { ...t, status: e.status, ...(e.detail ? { detail: e.detail } : {}) } : t)),
-            })),
+          onTool: (e) => patch(cur, (i) => ({ tools: applyToolEvent(i.tools, e) })),
           confirm: (req) => new Promise<ConfirmDecision>((resolve) => setPending({ kind: "confirm", req, resolve })),
           ask: (req) => new Promise<string>((resolve) => setPending({ kind: "ask", req, resolve })),
           confirmHandoff,

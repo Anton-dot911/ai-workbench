@@ -266,6 +266,7 @@ const check = (name, cond, extra = "") => { console.log((cond ? "PASS" : "FAIL")
   check("за пропозицією пам'яті йде третій запит із tool_result", posts.length === before3c + 3 && posts[before3c + 2].messages.at(-1).content[0].type === "tool_result");
   const searchCard = feedCards().at(-1);
   check("мітки: веб-пошук із запитом і пропозиція пам'яті", /веб-пошук: web push ios/.test(searchCard.textContent) && /пропозиція пам'яті/.test(searchCard.textContent), searchCard.querySelector(".toolrow")?.textContent);
+  check("завершений запуск «Пошуку» не лишає міток «…»", ![...searchCard.querySelectorAll(".tool")].some((e) => /^…/.test(e.textContent.trim())), [...searchCard.querySelectorAll(".tool")].map((e) => e.textContent).join(" | "));
   check("відповідь із маркерами цитат", /Web Push працює на iOS 16\.4\+ \[1\] лише для PWA\. \[2\]/.test(searchCard.querySelector(".ptext").textContent), searchCard.querySelector(".ptext").textContent);
   const links = [...searchCard.querySelectorAll(".srcs a")];
   check("джерела: два посилання, відкриваються в новій вкладці безпечно", links.length === 2 && links[0].href === "https://webkit.org/blog/1" && links[0].rel.includes("noopener") && links[0].target === "_blank");
